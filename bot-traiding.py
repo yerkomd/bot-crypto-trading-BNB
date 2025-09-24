@@ -39,23 +39,15 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')     # Carga desde .env
 
 # Parámetros con valores por defecto
 symbol = os.getenv('SYMBOL', 'BTCUSDT')  # Usa BTCUSDT si no está definido
-rsi_threshold = float(os.getenv('RSI_THRESHOLD', 40))  # Default 40
-take_profit_pct = float(os.getenv('TAKE_PROFIT_PCT', 2))
-stop_loss_pct = float(os.getenv('STOP_LOSS_PCT', 6))
-position_size = float(os.getenv('POSITION_SIZE', 0.25))
-timeframe = os.getenv('TIMEFRAME', '1h')
+rsi_threshold = float(os.getenv('RSI_THRESHOLD'))  # Default 40
+take_profit_pct = float(os.getenv('TAKE_PROFIT_PCT'))
+stop_loss_pct = float(os.getenv('STOP_LOSS_PCT'))
+position_size = float(os.getenv('POSITION_SIZE'))
+timeframe = os.getenv('TIMEFRAME')
 step_size = 0.00001000 
+min_notional = 10  # Monto mínimo en USDT para abrir una posición
 
-# binance_api_key = os.getenv('BINANCE_API_KEY')
-# binance_api_secret = os.getenv('BINANCE_API_SECRET')
-# symbol = os.getenv('SYMBOL', 'BTCUSDT')
-# rsi_threshold = 40
-# take_profit_pct = 4
-# stop_loss_pct = 10
-# position_size = 0.05
-# timeframe = os.getenv('TIMEFRAME', '1h')
 
- # Valor obtenido del filtro LOT_SIZE
 
 # Variable Globales
 positions = []
@@ -298,39 +290,7 @@ def run_strategy():
                 send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
                 log_trade('buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )
                 save_positions(positions)
-            
-            # # Lógica de venta
-            # for position in positions[:]:
-            #     buy_price = position['buy_price']
-            #     amount = position['amount']
-            #     tack_profit = buy_price * (1 + take_profit_pct / 100)
-            #     profit=(1 + take_profit_pct / 100)
-
-            #     message = (f'close_price: {close_price:.6f} <= tack_profit {tack_profit:.2f} Precio_compra = {buy_price:.2f} | profit = {profit:.2f}')
-            #     # Enviar notificación a Telegram
-            #     send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-
-            #     # # Stop Loss
-            #     # if close_price <= buy_price * (1 - stop_loss_pct / 100):
-            #     #     client.order_market_sell(symbol=symbol, quantity=amount)
-            #     #     balance += amount * close_price
-            #     #     print(f'🚨 STOP LOSS: Vendemos {amount:.6f} BTC a {close_price:.2f} USDT')
-            #     #     log_trade('sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'STOP LOSS')
-            #     #     positions.remove(position)
-            #     #     save_positions(positions)
-
-            #     # Take Profit
-            #     if close_price >= buy_price * (1 + take_profit_pct / 100):
-            #         client.order_market_sell(symbol=symbol, quantity=amount)
-            #         balance += amount * close_price
-            #         message = (f'🎯 TAKE PROFIT: Vendemos {amount:.6f} BTC a {close_price:.2f} USDT')
-            #         # Enviar notificación a Telegram
-            #         send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-            #         log_trade('sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'TAKE PROFIT')
-            #         positions.remove(position)
-            #         save_positions(positions)
-
-            # Esperar 30 minutos para la siguiente ejecución
+ 
             n = n + 1
             print(n)
             send_positions_to_telegram(data, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
