@@ -58,6 +58,7 @@ cover/
 # Jupyter Notebook
 .ipynb_checkpoints
 *.ipynb~
+*.ipynb
 
 # PyCharm / VSCode
 .idea/

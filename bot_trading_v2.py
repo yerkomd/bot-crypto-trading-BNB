@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_DOWN
 import requests # Nuevo import
 from dotenv import load_dotenv # Nuevo import para cargar variables de entorno
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Cargar variables de entorno desde un archivo .env
 load_dotenv()
@@ -15,22 +16,14 @@ load_dotenv()
 if not os.path.exists('./files'):
     os.makedirs('./files')
     
-log_filename = './files/trading_log.csv'
-# Archivo para guardar posiciones abiertas
-positions_file = './files/open_positions.csv'
+def get_log_filename(symbol):
+    return f'./files/trading_log_{symbol}.csv'
 
-# Si el archivo no existe, escribir la cabecera con delimitador pipe
-if not os.path.exists(log_filename):
-    with open(log_filename, 'w') as f:
-        f.write('fecha|nivel|trade_type|price|amount|profit|volatility|rsi|stochrsi_k|stochrsi_d|description\n')
+def get_positions_file(symbol):
+    return f'./files/open_positions_{symbol}.csv'
 
-# Configurar logging para registrar las operaciones en un archivo con delimitador pipe
-logging.basicConfig(
-    filename=log_filename,
-    level=logging.INFO,
-    format='%(asctime)s|%(levelname)s|%(message)s'
-)
 
+# Configuración de Binance
 binance_api_key = os.getenv('BINANCE_API_KEY')
 binance_api_secret = os.getenv('BINANCE_API_SECRET')
 # --- Configuración de Telegram (NUEVO) ---
@@ -38,16 +31,16 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') # Carga desde .env
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')     # Carga desde .env
 
 # Parámetros con valores por defecto
-symbol = os.getenv('SYMBOL', 'BTCUSDT')  # Usa BTCUSDT si no está definido
+SYMBOLS = os.getenv('SYMBOLS', 'BTCUSDT,ETHUSDT,BNBUSDT').split(',')  # Usa BTCUSDT si no está definido
 rsi_threshold = float(os.getenv('RSI_THRESHOLD'))  # Default 40
 take_profit_pct = float(os.getenv('TAKE_PROFIT_PCT'))
 stop_loss_pct = float(os.getenv('STOP_LOSS_PCT'))
-trailing_tacke_profit_pct = float(os.getenv('TRAILING_TAKE_PROFIT_PCT'))
+trailing_take_profit_pct = float(os.getenv('TRAILING_TAKE_PROFIT_PCT'))
 trailing_stop_pct = float(os.getenv('TRAILING_STOP_PCT'))
 position_size = float(os.getenv('POSITION_SIZE'))
 timeframe = os.getenv('TIMEFRAME')
-step_size = 0.00001000 
-min_notional = 10  # Monto mínimo en USDT para abrir una posición
+step_size = float(os.getenv('STEP_SIZE', 0.00001))
+min_notional = float(os.getenv('MIN_NOTIONAL', 10))
 
 
 
@@ -66,30 +59,27 @@ def get_balance():
     balance = client.get_asset_balance(asset='USDT')
     return float(balance['free'])
 
-# Cargar posiciones abiertas desde CSV
-def load_positions():
-    global positions
+# Cargar posiciones abiertas desde CSV por símbolo
+def load_positions(symbol):
+    positions_file = get_positions_file(symbol)
     if os.path.exists(positions_file) and os.stat(positions_file).st_size > 0:
         try:
             df = pd.read_csv(positions_file)
-            # Filtrar filas que tengan valores numéricos válidos
             df = df[pd.to_numeric(df['buy_price'], errors='coerce').notnull()]
-            positions.clear()
-            positions.extend(df.to_dict('records'))
-        except Exception as e:
-            print(f"Error al cargar posiciones: {e}")
-            positions.clear()
-    else:
-        positions.clear()
-    return positions
+            return df.to_dict('records')
+        except pd.errors.EmptyDataError:
+            return []
+    return []
+
 
 # Guardar posiciones abiertas en CSV
-def save_positions(positions):
-    df = pd.DataFrame(positions)
+def save_positions(symbol, positions_list):
+    positions_file = get_positions_file(symbol)
+    df = pd.DataFrame(positions_list)
     df.to_csv(positions_file, index=False)
 
 # Obtener datos en tiempo real
-def get_data_binance():
+def get_data_binance(symbol):
     candles = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1HOUR, limit=40)
     
     df = pd.DataFrame(candles, columns=[
@@ -146,22 +136,28 @@ def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
     return df
 
 # Función para guardar logs de operaciones para análisis ML
-def log_trade(trade_type, price, amount, profit, volatility, rsi, stochrsi_k, stochrsi_d, description):
-    logging.info(f"{trade_type}|{price}|{amount}|{profit}|{volatility}|{rsi}|{stochrsi_k}|{stochrsi_d}|{description}")
+
+def log_trade(timestamp, symbol, trade_type, price, amount, profit, volatility, rsi, stochrsi_k, stochrsi_d, description):
+    log_filename = get_log_filename(symbol)
+    if not os.path.exists(log_filename):
+        with open(log_filename, 'w') as f:
+            f.write('fecha|symbol|trade_type|price|amount|profit|volatility|rsi|stochrsi_k|stochrsi_d|description\n')
+    with open(log_filename, 'a') as f:
+        f.write(f"{timestamp}|{symbol}|{trade_type}|{price}|{amount}|{profit}|{volatility}|{rsi}|{stochrsi_k}|{stochrsi_d}|{description}\n")
 
 # Función para enviar notificaciones a Telegram
-def send_positions_to_telegram(data, token, chat_id):
-    global positions
+def send_positions_to_telegram(symbol, data, token, chat_id):
+    positions = load_positions(symbol)
     if not positions:
         message = "No hay posiciones abiertas actualmente. \n"
-        # Obtener el último precio y métricas técnicas        
+        # Obtener el último precio y métricas técnicas
         df = cal_metrics_technig(data, 14, 10, 20)
         close_price = df['close'].iloc[-1]
         rsi = df['rsi'].iloc[-1]
         stochrsi_k = df['stochrsi_k'].iloc[-1]
         stochrsi_d = df['stochrsi_d'].iloc[-1]
         message += (
-            f"\nPrecio actual: {close_price:.2f} USDT\n"
+            f"\nPrecio actual: {close_price:.2f} {symbol}\n"
             f"RSI: {rsi:.2f}\n"
             f"StochRSI K: {stochrsi_k:.2f}\n"
             f"StochRSI D: {stochrsi_d:.2f}\n"
@@ -171,11 +167,11 @@ def send_positions_to_telegram(data, token, chat_id):
         message += "\n\n*Esperando nuevas oportunidades de compra...*"
         message += "\n\n*¡Mantente atento a las actualizaciones!*"
     else:
-        message = "📊 *Posiciones abiertas de BTC:*\n"
+        message = "📊 *Posiciones abiertas de {symbol}:*\n"
         for pos in positions:
             message += (
                 f"- Precio compra: {pos['buy_price']:.2f} USDT\n"
-                f"  Cantidad: {pos['amount']:.6f} BTC\n"
+                f"  Cantidad: {pos['amount']:.6f} {symbol}\n"
                 f"  Fecha: {pos['timestamp']}\n"
             )
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -190,7 +186,7 @@ def send_positions_to_telegram(data, token, chat_id):
         print(f"Error enviando mensaje a Telegram: {e}")
 
 # Función para enviar notificaciones a Telegram
-def send_event_to_telegram(message, token, chat_id):        
+def send_event_to_telegram(message, token, chat_id):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -201,56 +197,79 @@ def send_event_to_telegram(message, token, chat_id):
         requests.post(url, data=payload)
     except Exception as e:
         print(f"Error enviando mensaje a Telegram: {e}")
+# Función para calcular el % de cambio en los últimos 5 intervalos de 4h
+def market_change_last_5_intervals(symbol):
+    """
+    Calcula el % de cambio en cada uno de los últimos 5 intervalos de 4h.
+    Devuelve una lista con el % de cambio por intervalo y el promedio total.
+    """
+    # Obtener las últimas 5 velas de 4h
+    candles = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_4HOUR, limit=5)
+    df = pd.DataFrame(candles, columns=[
+        'timestamp', 'open', 'high', 'low', 'close', 'volume', '_', '_', '_', '_', '_', '_'
+    ])
+    df['open'] = df['open'].astype(float)
+    df['close'] = df['close'].astype(float)
+
+    percent_changes = []
+    for i in range(len(df)):
+        open_price = df['open'].iloc[i]
+        close_price = df['close'].iloc[i]
+        percent_change = ((close_price - open_price) / open_price) * 100
+        percent_changes.append(percent_change)
+
+    # suma los cambios de los %, si la sumatoria es positiva, el mercado está en tendencia alcista
+    sum_changes = sum(percent_changes)
+
+    return sum_changes
 
 # Función para monitorear stop loss de forma asíncrona
 # Esta función se ejecutará en un hilo separado para monitorear las posiciones abiertas y ejecutar stop
-def monitor_stop_loss(client, symbol, stop_loss_pct, balance, lock):
-    global positions
+def monitor_stop_loss(symbol, lock):
     while True:
         with lock:
-            current_price = get_data_binance()['close'].iloc[-1]
-            timestamp = pd.Timestamp.now()
+            positions = load_positions(symbol)
+            data = get_data_binance(symbol)
+            close_price = data['close'].iloc[-1]
             for position in positions[:]:
                 tacke_profit = position['tacke_profit']
                 stop_loss = position['stop_loss']
                 buy_price = position['buy_price']
                 amount = position['amount']
 
-                if current_price >= tacke_profit:
-                    position['tacke_profit'] = current_price * (1 + trailing_tacke_profit_pct/100)  # Actualizar take profit
-                    position['stop_loss'] = current_price * (1 - trailing_stop_pct /100)  # Actualizar stop loss
-                    save_positions(positions)
+                if close_price >= tacke_profit:
+                    position['tacke_profit'] = close_price * (1 + trailing_take_profit_pct/100)  # Actualizar take profit
+                    position['stop_loss'] = close_price * (1 - trailing_stop_pct /100)  # Actualizar stop loss
+                    save_positions(symbol, positions)
                 else:
-                    if current_price <= stop_loss:
+                    if close_price <= stop_loss:
                         if stop_loss >= buy_price:
-                            client.order_market_sell(symbol=symbol, quantity=amount)
+                            #client.order_market_sell(symbol=symbol, quantity=amount)
                             balance = get_balance()
-                            message = (f'🎯 TAKE PROFIT: Vendemos {amount:.6f} BTC a {current_price:.2f} USDT')
-                            log_trade(timestamp, 'sell', current_price, amount, (current_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'TAKE PROFIT')
+                            message = (f'🎯 TAKE PROFIT: Vendemos {amount:.6f} {symbol} a {close_price:.2f} USDT')
+                            log_trade(timestamp, symbol, 'sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'TAKE PROFIT')
                             send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
                             positions.remove(position)
-                            save_positions(positions)
+                            save_positions(symbol, positions)
                         else:
-                            client.order_market_sell(symbol=symbol, quantity=amount)
+                            #client.order_market_sell(symbol=symbol, quantity=amount)
                             balance = get_balance()
-                            message(f'🚨 STOP LOSS: Vendemos {amount:.6f} BTC a {current_price:.2f} USDT')
-                            log_trade(timestamp, 'sell', current_price, amount, (current_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'STOP LOSS')
+                            message(f'🚨 STOP LOSS: Vendemos {amount:.6f} {symbol} a {close_price:.2f} USDT')
+                            log_trade(timestamp, symbol, 'sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'STOP LOSS')
                             send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
                             positions.remove(position)
-                            save_positions(positions)
+                            save_positions(symbol, positions)
         time.sleep(60)  # Monitorea cada minuto
 
 # Ejecutar la estrategia en tiempo real
-def run_strategy():
+def run_strategy(symbol, lock):
     balance = get_balance()
-    global positions
     print(f'Balance inicial: {balance:.2f} USDT')
     n = 0
-
     while True:
         try:
-            data = get_data_binance()
-            
+            positions = load_positions(symbol)
+            data = get_data_binance(symbol)
             df = cal_metrics_technig(data,14, 10, 20)
             close_price = df['close'].iloc[-1]
             high = df['high'].iloc[-1]
@@ -261,51 +280,71 @@ def run_strategy():
             stochrsi_d = df['stochrsi_d'].iloc[-1]
             volatility = (high - low) / open_price * 100  # Calcular volatilidad en porcentaje
             timestamp = df['timestamp'].iloc[-1]
-            print(f'Último precio: {close_price:.2f} USDT | Volatilidad: {volatility:.2f}% | rsi: {rsi:.2f} | stochrsi_k: {stochrsi_k:.2f} | stochrsi_d: {stochrsi_d:.2f}')            
+            print(f'Último precio: {close_price:.2f} {symbol} | Volatilidad: {volatility:.2f}% | rsi: {rsi:.2f} | stochrsi_k: {stochrsi_k:.2f} | stochrsi_d: {stochrsi_d:.2f}')            
             # Lógica de compra
             if (rsi < rsi_threshold and 
                 stochrsi_k > stochrsi_d and 
                 balance > min_notional and
                 len(positions) < 5): # Limitar a 5 posiciónes abiertas
-                buy_amount = (balance * position_size) / close_price
-                print(buy_amount)
-                buy_amount = ajustar_cantidad(buy_amount, step_size)
-                print(buy_amount)
-                order = client.order_market_buy(symbol=symbol, quantity=buy_amount)
+                buy_amount = (balance * position_size) / close_price                
+                buy_amount = ajustar_cantidad(buy_amount, step_size)                
+                client.order_market_buy(symbol=symbol, quantity=buy_amount)
                 new_position = {
-                    'buy_price': close_price, 
-                    'amount': buy_amount, 
-                    'timestamp': timestamp, 
+                    'buy_price': close_price,
+                    'amount': buy_amount,
+                    'timestamp': timestamp,
                     'tacke_profit': close_price * (1 + take_profit_pct/100),
                     'stop_loss': close_price * (1 - stop_loss_pct/100)}
                 positions.append(new_position)
                 balance = get_balance()
-                message = (f'📈 COMPRA: {buy_amount:.6f} BTC a {close_price:.2f} USDT')
+                message = (f'📈 COMPRA: {buy_amount:.6f} {symbol} a {close_price:.2f} USDT')
                 # Enviar notificación a Telegram
                 send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                log_trade('buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )
-                save_positions(positions)
- 
+                log_trade(timestamp, symbol, 'buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )
+                save_positions(symbol, positions)
+                time.sleep(5400)
+            else:
+                movimiento_mercado = market_change_last_5_intervals(symbol)
+                if movimiento_mercado <= -5 and len(positions) < 9:
+
+                    buy_amount = (balance * position_size) / close_price                    
+                    buy_amount = ajustar_cantidad(buy_amount, step_size)                    
+                    client.order_market_buy(symbol=symbol, quantity=buy_amount)
+                    new_position = {
+                        'buy_price': close_price, 
+                        'amount': buy_amount, 
+                        'timestamp': timestamp, 
+                        'tacke_profit': close_price * (1 + take_profit_pct/100),
+                        'stop_loss': close_price * (1 - stop_loss_pct/100)}
+                    positions.append(new_position)
+                    balance = get_balance()
+                    message = (f'📈 COMPRA: {buy_amount:.6f} {symbol} a {close_price:.2f} USDT por caida de precio {movimiento_mercado}%')
+                    # Enviar notificación a Telegram
+                    send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                    log_trade(timestamp, symbol, 'buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )                
+                    save_positions(symbol, positions)
+                    time.sleep(5400)
+
             n = n + 1
             print(n)
-            send_positions_to_telegram(data, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+            send_positions_to_telegram(symbol, data, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
             # if n % 6 == 0:  # Cada 6 iteraciones (3 horas)
             #     send_positions_to_telegram(positions, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
             #     print("Enviando posiciones abiertas a Telegram...")
 
-            time.sleep(1800)  
+            time.sleep(1000)
         except Exception as e:
             print(f'Error en la ejecución: {e}')
-            time.sleep(60)  # Esperar antes de reintentar
+            time.sleep(10)  # Esperar antes de reintentar
 
 # Ejecutar estrategia en tiempo real
 
 # En tu función principal:
 if __name__ == "__main__":
-    lock = threading.Lock()
-    positions = load_positions()
-    # Lanza el hilo de monitoreo asíncrono
-    stop_loss_thread = threading.Thread(target=monitor_stop_loss, args=(client, symbol, stop_loss_pct, get_balance(), lock), daemon=True)
-    stop_loss_thread.start()
-    # Aquí sigue tu lógica principal (run_strategy)
-    run_strategy()
+    locks = {symbol: threading.Lock() for symbol in SYMBOLS}
+    with ThreadPoolExecutor(max_workers=len(SYMBOLS) * 2) as executor:
+        for symbol in SYMBOLS:
+            executor.submit(monitor_stop_loss, symbol, locks[symbol])
+            executor.submit(run_strategy, symbol, locks[symbol])
+        # Mantener vivo
+        executor.shutdown(wait=True)
