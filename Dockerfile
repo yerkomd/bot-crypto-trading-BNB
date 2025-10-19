@@ -3,6 +3,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Desactivar buffering de Python (importante para docker logs)
+ENV PYTHONUNBUFFERED=1
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -11,7 +14,7 @@ COPY bot_trading_v2.py .
 # Si tienes otros módulos o archivos necesarios, agrégalos aquí
 # COPY otros_archivos_o_carpetas /app/
 
-RUN mkdir -p /app/files
+RUN mkdir -p /app/files /app/logs
 
 CMD ["python", "bot_trading_v2.py"]
 

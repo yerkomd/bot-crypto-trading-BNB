@@ -2,7 +2,9 @@ from binance.client import Client
 import time
 import pandas as pd
 import os
+import sys
 import logging
+import logging.handlers
 import ta
 from decimal import Decimal, ROUND_DOWN
 import requests # Nuevo import
@@ -12,6 +14,40 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Cargar variables de entorno desde un archivo .env
 load_dotenv()
+
+# Fallback robusto para excepciones de la lib
+try:
+    from binance.exceptions import BinanceAPIException
+except Exception:
+    try:
+        from binance.error import ClientError as BinanceAPIException
+    except Exception:
+        class BinanceAPIException(Exception):
+            pass
+
+# Configuración de logging: salida a stdout (para docker logs) + archivo rotativo
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+
+# Crear directorio de logs
+os.makedirs('./logs', exist_ok=True)
+
+
+# Configurar el logger root
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format='%(asctime)s %(levelname)s [%(threadName)s] %(name)s: %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),  # Para docker logs
+        logging.handlers.RotatingFileHandler(
+            './logs/bot_trading.log', 
+            maxBytes=10*1024*1024, 
+            backupCount=5
+        )
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("Bot Trading v2 iniciado. LOG_LEVEL=%s", LOG_LEVEL)
 
 if not os.path.exists('./files'):
     os.makedirs('./files')
@@ -31,14 +67,14 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') # Carga desde .env
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')     # Carga desde .env
 
 # Parámetros con valores por defecto
-SYMBOLS = [s.strip() for s in os.getenv('SYMBOLS', 'BTCUSDT').split(',')]  # Limpia espacios y usa default
-rsi_threshold = float(os.getenv('RSI_THRESHOLD', 40))
-take_profit_pct = float(os.getenv('TAKE_PROFIT_PCT', 2.0))
-stop_loss_pct = float(os.getenv('STOP_LOSS_PCT', 2.0))
-trailing_take_profit_pct = float(os.getenv('TRAILING_TAKE_PROFIT_PCT', 0.8))
-trailing_stop_pct = float(os.getenv('TRAILING_STOP_PCT', 0.3))
-position_size = float(os.getenv('POSITION_SIZE', 0.03))
-timeframe = os.getenv('TIMEFRAME', '1h')
+SYMBOLS = [s.strip().upper() for s in os.getenv('SYMBOLS', 'BTCUSDT').split(',') if s.strip()]# Limpia espacios y usa default
+rsi_threshold = float(os.getenv('RSI_THRESHOLD'))
+take_profit_pct = float(os.getenv('TAKE_PROFIT_PCT'))
+stop_loss_pct = float(os.getenv('STOP_LOSS_PCT'))
+trailing_take_profit_pct = float(os.getenv('TRAILING_TAKE_PROFIT_PCT'))
+trailing_stop_pct = float(os.getenv('TRAILING_STOP_PCT'))
+position_size = float(os.getenv('POSITION_SIZE'))
+timeframe = os.getenv('TIMEFRAME')
 step_size = float(os.getenv('STEP_SIZE', 0.00001))
 min_notional = float(os.getenv('MIN_NOTIONAL', 10))
 # Variables para control de frecuencia de compras
@@ -46,11 +82,32 @@ cooldown_seconds = int(os.getenv('BUY_COOLDOWN_SECONDS', '5400'))  # 90 min por 
 poll_interval = int(os.getenv('POLL_INTERVAL_SECONDS', '30'))      # frecuencia de chequeo
 
 if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-    print("Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.")
-    print("Asegúrate de crear un archivo .env con las variables.")
+    logger.info("Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.")
+    logger.info("Asegúrate de crear un archivo .env con las variables.")
 # Configurar la conexión a Binance en Testnet
 client = Client(binance_api_key, binance_api_secret, testnet=True)
 # Obtener balance inicial
+
+# Momento de arranque (para ignorar mensajes viejos)
+STARTED_AT = int(time.time())
+
+def init_telegram_offset(url, chat_id=None):
+    """
+    Drena updates pendientes y devuelve el último update_id para arrancar desde el siguiente.
+    """
+    try:
+        resp = requests.get(url, params={"timeout": 1, "limit": 100}, timeout=5)
+        data = resp.json()
+        results = data.get("result", [])
+        # Opcional: filtrar por chat_id
+        if chat_id:
+            results = [u for u in results if str(u.get("message", {}).get("chat", {}).get("id")) == str(chat_id)]
+        if results:
+            return results[-1]["update_id"]
+    except Exception as e:
+        logger.warning(f"init_telegram_offset: {e}")
+    return None
+
 def get_balance():
     try:
         balance = client.get_asset_balance(asset='USDT')
@@ -58,7 +115,7 @@ def get_balance():
             return 0.0
         return float(balance.get('free', 0.0))
     except Exception as e:
-        print(f"Error obteniendo balance USDT: {e}")
+        logger.error(f"Error obteniendo balance USDT: {e}")
         return 0.0
 # Cargar posiciones abiertas desde CSV por símbolo
 def load_positions(symbol):
@@ -100,23 +157,6 @@ def get_data_binance(symbol, interval='1h', limit=40):
     df['low'] = df['low'].astype(float)
     df['volume'] = df['volume'].astype(float)    
     return df
-
-def ajustar_cantidad(cantidad, step_size):
-    """
-    Ajusta 'cantidad' para que sea un múltiplo de 'step_size' utilizando la precisión adecuada.
-    """
-    # Convertir a Decimal para mayor precisión
-    cantidad_dec = Decimal(str(cantidad))
-    step_size_dec = Decimal(str(step_size))
-    
-    # Obtener el número de decimales permitido a partir del step_size
-    decimales = -step_size_dec.as_tuple().exponent
-    # Crear el factor de cuantización, por ejemplo: '1e-5' para 5 decimales
-    factor = Decimal('1e-' + str(decimales))
-    
-    # Truncar la cantidad hacia abajo para que sea múltiplo del step_size
-    cantidad_ajustada = cantidad_dec.quantize(factor, rounding=ROUND_DOWN)
-    return float(cantidad_ajustada)
 
 #Calculo de metricas tecnicas para el traiding
 
@@ -191,7 +231,7 @@ def send_positions_to_telegram(symbol, data, token, chat_id):
     try:
         requests.post(url, data=payload)
     except Exception as e:
-        print(f"Error enviando mensaje a Telegram: {e}")
+        logger.error(f"Error enviando mensaje a Telegram: {e}")
 
 # Función para enviar notificaciones a Telegram
 def send_event_to_telegram(message, token, chat_id):
@@ -204,7 +244,7 @@ def send_event_to_telegram(message, token, chat_id):
     try:
         requests.post(url, data=payload)
     except Exception as e:
-        print(f"Error enviando mensaje a Telegram: {e}")
+        logger.error(f"Error enviando mensaje a Telegram: {e}")
 # Función para calcular el % de cambio en los últimos 5 intervalos de 4h
 def market_change_last_5_intervals(symbol):
     """
@@ -236,56 +276,147 @@ def get_precio_actual(symbol):
         ticker = client.get_symbol_ticker(symbol=symbol)
         return float(ticker['price'])
     except Exception as e:
-        print(f"Error obteniendo precio para {symbol}: {e}")
+        logger.error(f"Error obteniendo precio para {symbol}: {e}")
         return None
 
 # Función para ejecutar órdenes con confirmación y reintentos
-def ejecutar_orden_con_confirmacion(tipo, symbol, cantidad, max_intentos=10):
+def ejecutar_orden_con_confirmacion(
+    tipo: str,
+    symbol: str,
+    cantidad: float,
+    max_intentos: int = 5,
+    verificaciones_por_intento: int = 6,
+    delay_verificacion: float = 2.0,
+    backoff_base: float = 2.0,
+    permitir_parcial: bool = True,
+):
     """
-    Ejecuta una orden de compra o venta en Binance y espera confirmación.
-    Reintenta hasta max_intentos veces. Si falla, envía alerta por Telegram.
-    tipo: 'buy' o 'sell'
+    Envía orden MARKET y espera confirmación consultando get_order.
+    Reintenta si no se llena dentro de las verificaciones configuradas.
+    Si permitir_parcial=True y la orden queda PARTIALLY_FILLED tras cancelación,
+    acepta el parcial y retorna el estado final.
     """
+    tipo = tipo.lower()
+    if tipo not in ('buy', 'sell'):
+        raise ValueError("Tipo de orden inválido. Usa 'buy' o 'sell'.")
+    side_fn = client.order_market_buy if tipo == 'buy' else client.order_market_sell
+
     for intento in range(1, max_intentos + 1):
         try:
-            if tipo == 'buy':
-                respuesta = client.order_market_buy(symbol=symbol, quantity=cantidad)
-            elif tipo == 'sell':
-                respuesta = client.order_market_sell(symbol=symbol, quantity=cantidad)
-            else:
-                raise ValueError("Tipo de orden no válido. Usa 'buy' o 'sell'.")
+            # Enviar orden
+            resp = side_fn(symbol=symbol, quantity=cantidad)
+            order_id = resp['orderId']
+            logger.info(f"[{symbol}] 📨 Orden {tipo.upper()} enviada id={order_id} qty={cantidad} intento={intento}")
 
-            if respuesta.get('status') == 'FILLED':
-                print(f"✅ Orden {tipo} exitosa de {cantidad} {symbol} (intento {intento})")
-                send_event_to_telegram(
-                    f"✅ Orden {tipo} exitosa de {cantidad} {symbol} (intento {intento})",
-                    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-                )
-                return respuesta
-            else:
-                print(f"⚠️ Orden {tipo} no completada (intento {intento}): {respuesta}")
-                time.sleep(2)
+            filled = False
+            last_status = None
+            partial_executed = 0.0
+
+            for v in range(1, verificaciones_por_intento + 1):
+                time.sleep(delay_verificacion)
+                try:
+                    status_info = client.get_order(symbol=symbol, orderId=order_id)
+                except BinanceAPIException as ve:
+                    logger.error(f"[{symbol}] Error get_order id={order_id}: {ve}")
+                    continue
+
+                status = status_info.get('status')
+                executed_qty = float(status_info.get('executedQty', 0) or 0)
+                cummulative_quote_qty = float(status_info.get('cummulativeQuoteQty', 0) or 0)
+                last_status = status
+
+                if status == 'FILLED':
+                    logger.info(f"[{symbol}] ✅ Orden {tipo.upper()} FILLED qty={executed_qty}")
+                    send_event_to_telegram(
+                        f"✅ {tipo.upper()} {symbol}\nQty: {executed_qty}\nNotional: {cummulative_quote_qty:.8f} USDT",
+                        TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+                    )
+                    return status_info
+
+                if status == 'PARTIALLY_FILLED':
+                    partial_executed = executed_qty
+                    logger.info(f"[{symbol}] ⏳ Parcial {tipo.upper()} {executed_qty}/{cantidad} (verif {v}/{verificaciones_por_intento})")
+                    continue  # seguir verificando
+
+                if status in ('CANCELED', 'REJECTED', 'EXPIRED'):
+                    logger.warning(f"[{symbol}] ❌ Orden {order_id} estado terminal={status}")
+                    break  # salir de verificación e ir a reintento
+
+                # NEW u otros: seguir
+                logger.debug(f"[{symbol}] Estado {status} verif {v}/{verificaciones_por_intento}")
+
+            # Si terminó verificación sin FILLED
+            if last_status in ('NEW', 'PARTIALLY_FILLED'):
+                # Intentar cancelar para evitar que quede colgada
+                try:
+                    client.cancel_order(symbol=symbol, orderId=order_id)
+                    logger.info(f"[{symbol}] 🛑 Cancelada orden pendiente id={order_id} status_final={last_status}")
+                except Exception as ce:
+                    logger.warning(f"[{symbol}] No se pudo cancelar orden {order_id}: {ce}")
+
+                if last_status == 'PARTIALLY_FILLED' and permitir_parcial and partial_executed > 0:
+                    logger.info(f"[{symbol}] ✅ Aceptando ejecución parcial qty={partial_executed}")
+                    send_event_to_telegram(
+                        f"✅ Parcial {tipo.upper()} {symbol} qty={partial_executed} (aceptada)",
+                        TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+                    )
+                    status_info['acceptedPartial'] = True
+                    return status_info
+
+            # Backoff antes de próximo intento
+            sleep_time = backoff_base ** (intento - 1)
+            jitter = min(1.0, sleep_time * 0.15)
+            time.sleep(sleep_time + (jitter * 0.5))
+            logger.warning(f"[{symbol}] Reintento {intento+1}/{max_intentos} para orden {tipo.upper()} (status={last_status})")
+
+        except BinanceAPIException as be:
+            code = getattr(be, 'code', 'N/A')
+            msg = getattr(be, 'message', str(be))
+            logger.error(f"[{symbol}] ❌ BinanceAPIException intento={intento} code={code} msg={msg}")
+
+            # Errores no recuperables
+            if str(code) in ('-2010', '2010'):  # fondos insuficientes
+                send_event_to_telegram(f"❌ Fondos insuficientes {symbol} {tipo} qty={cantidad}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                return None
+            if 'LOT_SIZE' in msg or 'MIN_NOTIONAL' in msg:
+                send_event_to_telegram(f"❌ Filtro LOT_SIZE/MIN_NOTIONAL {symbol} qty={cantidad}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                return None
+
+            time.sleep(1.5)
+
         except Exception as e:
-            print(f"❌ Error en orden {tipo} (intento {intento}): {e}")
-            time.sleep(2)
-    # Si no se logra después de max_intentos
-    alerta = f"❌ No se pudo ejecutar la orden {tipo} de {cantidad} {symbol} después de {max_intentos} intentos."
-    print(alerta)
+            logger.error(f"[{symbol}] ❌ Error genérico en {tipo.upper()} intento={intento}: {e}")
+            time.sleep(1.0)
+
+    alerta = f"❌ No se pudo completar {tipo.upper()} {symbol} qty={cantidad} tras {max_intentos} intentos."
+    logger.error(alerta)
     send_event_to_telegram(alerta, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
     return None
+
 
 # Función para monitorear stop loss de forma asíncrona
 # Esta función se ejecutará en un hilo separado para monitorear las posiciones abiertas y ejecutar stop
 def monitoring_open_position(symbol, lock):
+    logger.info(f"[{symbol}] Iniciando hilo monitor posiciones")
     while True:
-        with lock:
-            positions = load_positions(symbol)
+        try:
+            # 1) Cargar posiciones rápido bajo lock
+            acquired = lock.acquire(timeout=1.0)
+            if not acquired:
+                # si está ocupado, intenta más tarde
+                time.sleep(2)
+                continue
+            try:
+                positions = load_positions(symbol)
+            finally:
+                lock.release()
+
             if not positions:
-                time.sleep(60)
+                time.sleep(30)
                 continue
 
+            # 2) Fuera del lock: llamadas de red y cálculo
             data = get_data_binance(symbol)
-            # Calcula métricas necesarias para el log y control
             df_metrics = cal_metrics_technig(data.copy(), 14, 10, 20)
             close_price = df_metrics['close'].iloc[-1]
             high = df_metrics['high'].iloc[-1]
@@ -297,135 +428,340 @@ def monitoring_open_position(symbol, lock):
             stochrsi_d = df_metrics['stochrsi_d'].iloc[-1] if 'stochrsi_d' in df_metrics.columns else None
             timestamp = pd.Timestamp.now()
 
-            for position in positions[:]:
+            # 3) Preparar actualizaciones y ventas fuera del lock
+            to_update = []
+            to_sell = []
+
+            for position in positions:
                 take_profit = position['take_profit']
                 stop_loss = position['stop_loss']
                 buy_price = position['buy_price']
                 amount = position['amount']
 
                 if close_price >= take_profit:
-                    # Actualiza trailing take profit y stop
-                    position['take_profit'] = close_price * (1 + trailing_take_profit_pct / 100)
-                    position['stop_loss'] = close_price * (1 - trailing_stop_pct / 100)
-                    save_positions(symbol, positions)
-                else:
-                    if close_price <= stop_loss:
-                        # Decide TAKE PROFIT vs STOP LOSS según relación con buy_price
-                        if stop_loss >= buy_price:
-                            # TAKE PROFIT
-                            respuesta = ejecutar_orden_con_confirmacion('sell', symbol, amount)  # descomenta si quieres trading real
-                            message = f'🎯 TAKE PROFIT: Vendemos {amount:.6f} {symbol} a {close_price:.2f} USDT'
-                            log_trade(timestamp, symbol, 'sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'TAKE PROFIT')
-                            send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                            positions.remove(position)
-                            save_positions(symbol, positions)
-                        else:
-                            # STOP LOSS
-                            respuesta = ejecutar_orden_con_confirmacion('sell', symbol, amount)  # descomenta si quieres trading real
-                            message = f'🚨 STOP LOSS: Vendemos {amount:.6f} {symbol} a {close_price:.2f} USDT'
-                            log_trade(timestamp, symbol, 'sell', close_price, amount, (close_price - buy_price) * amount, volatility, rsi, stochrsi_k, stochrsi_d, 'STOP LOSS')
-                            send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                            positions.remove(position)
-                            save_positions(symbol, positions)
-        time.sleep(60)  # Monitorea cada minuto
+                    # actualizar trailing objetivos (se aplicará bajo lock)
+                    to_update.append({
+                        'match': {'buy_price': buy_price, 'timestamp': str(position['timestamp'])},
+                        'fields': {
+                            'take_profit': close_price * (1 + trailing_take_profit_pct / 100),
+                            'stop_loss': close_price * (1 - trailing_stop_pct / 100),
+                        }
+                    })
+                elif close_price <= stop_loss:
+                    to_sell.append({
+                        'position': position,
+                        'reason': 'TAKE PROFIT' if stop_loss >= buy_price else 'STOP LOSS'
+                    })
+
+            # 4) Aplicar actualizaciones rápidas bajo lock
+            if to_update:
+                acquired = lock.acquire(timeout=1.0)
+                if acquired:
+                    try:
+                        current = load_positions(symbol)
+                        changed = False
+                        for upd in to_update:
+                            bp = float(upd['match']['buy_price'])
+                            ts = str(upd['match']['timestamp'])
+                            for p in current:
+                                if float(p.get('buy_price', 0)) == bp and str(p.get('timestamp')) == ts:
+                                    p.update(upd['fields'])
+                                    changed = True
+                        if changed:
+                            save_positions(symbol, current)
+                    finally:
+                        lock.release()
+
+            # 5) Procesar ventas: quitar posición bajo lock, vender fuera del lock
+            for item in to_sell:
+                pos = item['position']
+                reason = item['reason']
+
+                # Remover del archivo bajo lock
+                removed = None
+                acquired = lock.acquire(timeout=1.0)
+                if acquired:
+                    try:
+                        current = load_positions(symbol)
+                        for p in list(current):
+                            if float(p.get('buy_price', 0)) == float(pos['buy_price']) and str(p.get('timestamp')) == str(pos['timestamp']):
+                                current.remove(p)
+                                removed = p
+                                break
+                        if removed:
+                            save_positions(symbol, current)
+                    finally:
+                        lock.release()
+
+                if not removed:
+                    continue  # ya fue procesada por otro hilo
+
+                # Fuera del lock: validar qty y vender
+                free_qty = get_free_base_asset(symbol)
+                sell_qty = min(removed['amount'], free_qty)
+                sell_qty, motivo = sanitize_quantity(symbol, sell_qty, close_price, for_sell=True)
+                if not sell_qty:
+                    logger.warning(f"[{symbol}] No se puede vender ({reason}) qty={removed['amount']} motivo={motivo}")
+                    send_event_to_telegram(f"⚠️ No se puede vender {symbol} ({reason}) qty={removed['amount']} motivo={motivo}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                    # opcional: reinsertar posición si no se vendió
+                    acquired = lock.acquire(timeout=1.0)
+                    if acquired:
+                        try:
+                            current = load_positions(symbol)
+                            current.append(removed)
+                            save_positions(symbol, current)
+                        finally:
+                            lock.release()
+                    continue
+
+                resp = ejecutar_orden_con_confirmacion('sell', symbol, sell_qty)
+                if not resp:
+                    logger.error(f"[{symbol}] Venta fallida qty={sell_qty} ({reason})")
+                    # opcional: reinsertar posición si falla la orden
+                    acquired = lock.acquire(timeout=1.0)
+                    if acquired:
+                        try:
+                            current = load_positions(symbol)
+                            current.append(removed)
+                            save_positions(symbol, current)
+                        finally:
+                            lock.release()
+                    continue
+
+                emoji = '🎯' if reason == 'TAKE PROFIT' else '🚨'
+                msg = f'{emoji} {reason}: Vendemos {sell_qty:.6f} {symbol} a {close_price:.4f} USDT'
+                send_event_to_telegram(msg, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                log_trade(timestamp, symbol, 'sell', close_price, sell_qty, (close_price - removed['buy_price']) * sell_qty, volatility, rsi, stochrsi_k, stochrsi_d, reason)
+
+        except Exception:
+            logger.exception(f"[{symbol}] Error en monitoring_open_position")
+
+        # 6) Dormir fuera del lock
+        time.sleep(30)
 # listen telegram messages
 # ...
 
 def listen_telegram_commands(token, chat_id, symbols, locks):
     last_update_id = None
     url = f"https://api.telegram.org/bot{token}/getUpdates"
-    print("Escuchando comandos de Telegram...")
+    logger.info("Escuchando comandos de Telegram...")
+
+    # 1) Drenar updates pendientes al iniciar
+    last_update_id = init_telegram_offset(url, chat_id)
+
     while True:
         try:
             params = {"timeout": 60}
-            if last_update_id:
+            if last_update_id is not None:
                 params["offset"] = last_update_id + 1
+
             response = requests.get(url, params=params, timeout=65)
             data = response.json()
+
             if "result" in data:
                 for update in data["result"]:
-                    last_update_id = update["update_id"]
-                    if "message" in update and "text" in update["message"]:
-                        text = update["message"]["text"].strip().lower()
-                        print(f"Comando recibido: {text}")
+                    # 2) Ignorar updates viejos o de otros chats
+                    if "message" not in update:
+                        last_update_id = update["update_id"]
+                        continue
+                    msg = update["message"]
+                    if str(msg.get("chat", {}).get("id")) != str(chat_id):
+                        last_update_id = update["update_id"]
+                        continue
+                    if msg.get("date", 0) < STARTED_AT:
+                        last_update_id = update["update_id"]
+                        continue
 
-                        if text == "/positions":
-                            for symbol in symbols:
-                                data = get_data_binance(symbol)
-                                send_positions_to_telegram(symbol, data, token, chat_id)
+                    text = (msg.get("text") or "").strip().lower()
+                    last_update_id = update["update_id"]  # actualizar antes de ejecutar acción
+                    logger.info(f"Comando recibido: {text}")
 
-                        elif text == "/sellall":
-                            for symbol in symbols:
-                                with locks[symbol]:
-                                    positions = load_positions(symbol)
-                                    data = get_data_binance(symbol)
-                                    close_price = data['close'].iloc[-1]
-                                    for position in positions[:]:
-                                        amount = position['amount']
-                                        ejecutar_orden_con_confirmacion('sell', symbol, amount)
-                                        log_trade(pd.Timestamp.now(), symbol, 'sell', close_price, amount,
-                                                  (close_price - position['buy_price']) * amount, 0, 0, 0, 0, 'SELL ALL')
-                                        positions.remove(position)
-                                    save_positions(symbol, positions)
-                                    send_event_to_telegram(f"🚨 Todas las posiciones de {symbol} vendidas.", token, chat_id)
+                    if text == "/posiciones":
+                        for symbol in symbols:
+                            data_symbol = get_data_binance(symbol)
+                            send_positions_to_telegram(symbol, data_symbol, token, chat_id)
 
-                        elif text == "/stop":
-                            send_event_to_telegram("🛑 Bot detenido por comando.", token, chat_id)
-                            os._exit(0)
-
-                        elif text == "/balance" or text == "/saldo":
-                            # Obtener USDT disponible (puede fallar si API no responde)
-                            try:
-                                usdt_free = get_balance()
-                            except Exception as e:
-                                usdt_free = None
-                                print(f"Error obteniendo balance USDT: {e}")
-
-                            total_positions_value = 0.0
-                            details = ""
-                            for symbol in symbols:
-                                with locks[symbol]:
-                                    positions = load_positions(symbol)
-                                if not positions:
+                    elif text == "/sellall":
+                        for symbol in symbols:
+                            with locks[symbol]:
+                                positions = load_positions(symbol)
+                                save_positions(symbol, [])
+                            if not positions:
+                                continue
+                            price = get_precio_actual(symbol)
+                            for position in positions:
+                                free_qty = get_free_base_asset(symbol)
+                                sell_qty = min(position['amount'], free_qty)
+                                sell_qty, motivo = sanitize_quantity(symbol, sell_qty, price, for_sell=True)
+                                if not sell_qty:
+                                    logger.info(f"[{symbol}] Skip sellall qty={position['amount']} motivo={motivo}")
                                     continue
-                                price = get_precio_actual(symbol)
-                                if price is None:
-                                    continue
-                                for p in positions:
-                                    pos_value = float(p.get('amount', 0)) * price
-                                    total_positions_value += pos_value
-                                    details += f"{symbol}: {p.get('amount',0):.6f} @ {price:.2f} = {pos_value:.2f} USDT\n"
+                                resp = ejecutar_orden_con_confirmacion('sell', symbol, sell_qty)
+                                if resp:
+                                    log_trade(pd.Timestamp.now(), symbol, 'sell', price, sell_qty,
+                                              (price - position['buy_price']) * sell_qty, 0, 0, 0, 0, 'SELL ALL')
+                        send_event_to_telegram(f"🚨 Todas las posiciones vendidas.", token, chat_id)
 
-                            msg = ""
-                            if usdt_free is not None:
-                                msg += f"💵 Balance disponible (USDT): {usdt_free:.2f} USDT\n"
-                            else:
-                                msg += "💵 Balance USDT: error al obtener\n"
-                            msg += f"📦 Valor estimado posiciones abiertas: {total_positions_value:.2f} USDT\n"
-                            if details:
-                                msg += "\nDetalles:\n" + details
+                    elif text == "/stop":
+                        send_event_to_telegram("🛑 Bot detenido por comando.", token, chat_id)
+                        # 3) ACK explícito del último update antes de salir
+                        try:
+                            requests.get(url, params={"offset": last_update_id + 1, "timeout": 1}, timeout=2)
+                        except Exception as e:
+                            logger.warning(f"ACK /stop falló: {e}")
+                        os._exit(0)
 
-                            send_event_to_telegram(msg, token, chat_id)
+                    elif text in ("/balance", "/saldo"):
+                        try:
+                            usdt_free = get_balance()
+                        except Exception as e:
+                            usdt_free = None
+                            logger.error(f"Error obteniendo balance USDT: {e}")
+
+                        total_positions_value = 0.0
+                        details = ""
+                        for symbol in symbols:
+                            with locks[symbol]:
+                                positions = load_positions(symbol)
+                            if not positions:
+                                continue
+                            price = get_precio_actual(symbol)
+                            if price is None:
+                                continue
+                            for p in positions:
+                                pos_value = float(p.get('amount', 0)) * price
+                                total_positions_value += pos_value
+                                details += f"{symbol}: {p.get('amount',0):.6f} @ {price:.2f} = {pos_value:.2f} USDT\n"
+
+                        msg_out = ("💵 Balance disponible (USDT): "
+                                   f"{usdt_free:.2f} USDT\n" if usdt_free is not None else
+                                   "💵 Balance USDT: error al obtener\n")
+                        msg_out += f"📦 Valor estimado posiciones abiertas: {total_positions_value:.2f} USDT\n"
+                        if details:
+                            msg_out += "\nDetalles:\n" + details
+                        send_event_to_telegram(msg_out, token, chat_id)
 
             time.sleep(1)
+
         except Exception as e:
-            print(f"Error escuchando comandos de Telegram: {e}")
+            logger.error(f"Error escuchando comandos de Telegram: {e}")
             time.sleep(5)
+
+def get_symbol_filters(symbol):
+    info = client.get_symbol_info(symbol)
+    lot = next(f for f in info['filters'] if f['filterType'] == 'LOT_SIZE')
+    min_qty = float(lot['minQty'])
+    step = float(lot['stepSize'])
+    max_qty = float(lot['maxQty'])
+    notional_filter = next((f for f in info['filters'] if f['filterType'] in ('MIN_NOTIONAL','NOTIONAL')), None)
+    min_notional = float(notional_filter['minNotional']) if notional_filter else 0.0
+    return {
+        'min_qty': min_qty,
+        'step_size': step,
+        'max_qty': max_qty,
+        'min_notional': min_notional
+    }
+
+def floor_to_step(qty: float, step: float) -> float:
+    """
+    Ajusta qty hacia abajo al múltiplo válido de step usando Decimal (sin errores binarios).
+    Devuelve 0.0 si step es inválido o si qty < step.
+    """
+    try:
+        d_qty = Decimal(str(qty))
+        d_step = Decimal(str(step))
+        if d_step <= 0:
+            logger.error(f"floor_to_step: step inválido={step}")
+            return 0.0
+        steps = (d_qty / d_step).to_integral_value(rounding=ROUND_DOWN)
+        adjusted = steps * d_step
+        return float(adjusted)
+    except Exception as e:
+        logger.error(f"floor_to_step error qty={qty} step={step}: {e}")
+        return 0.0
+
+
+def sanitize_quantity(symbol: str, qty: float, price: float, for_sell: bool = False):
+    """
+    Ajusta qty al step y valida min_qty y min_notional.
+    Devuelve (qty_ajustada | None, motivo | None)
+    """
+    try:
+        f = get_symbol_filters(symbol)
+    except Exception as e:
+        return None, f"no filters: {e}"
+    adj = floor_to_step(qty, f['step_size'])
+    if adj < f['min_qty']:
+        return None, f"qty<{f['min_qty']}"
+    if adj * price < f['min_notional']:
+        return None, f"notional<{f['min_notional']}"
+    return adj, None
+
+def get_free_base_asset(symbol: str) -> float:
+    info = client.get_symbol_info(symbol)
+    base = info['baseAsset']
+    try:
+        bal = client.get_asset_balance(asset=base)
+        if not bal:
+            return 0.0
+        return float(bal.get('free', 0.0))
+    except Exception:
+        return 0.0
+
+# --- Ajuste preparar_cantidad (reemplaza la versión actual) ---
+def preparar_cantidad(symbol, usd_balance_frac, price):
+    """
+    Calcula una cantidad válida según filtros de Binance para el símbolo.
+    Retorna (qty, motivo_error|None).
+    """
+    try:
+        filters = get_symbol_filters(symbol)
+    except Exception as e:
+        return None, f"no symbol filters ({e})"
+    raw_qty = usd_balance_frac / price
+    step = filters['step_size']
+    # Ajustar con floor al múltiplo válido (evita .quantize errores por representaciones binarias)
+    from math import floor
+    steps = floor(raw_qty / step)
+    qty = steps * step
+    qty = float(f"{qty:.15f}")  # normalizar
+    if qty < filters['min_qty']:
+        return None, f"qty < min_qty ({qty} < {filters['min_qty']})"
+    notional = qty * price
+    if notional < filters['min_notional']:
+        return None, f"notional < min_notional ({notional} < {filters['min_notional']})"
+    return qty, None
+
+# --- Agregar helper de debug de filtros (opcional para investigar problemas) ---
+def debug_symbol_filters(symbol):
+    f = get_symbol_filters(symbol)
+    logger.debug(f"Filtros {symbol}: min_qty={f['min_qty']} step={f['step_size']} max_qty={f['max_qty']} min_notional={f['min_notional']}")
+
 
 # Ejecutar la estrategia en tiempo real
 def run_strategy(symbol, lock):
+    logger.info(f"[{symbol}] Iniciando hilo de estrategia")
     balance = get_balance()
-    print(f'Balance inicial: {balance:.2f} USDT')
+    logger.info(f"[{symbol}] Balance inicial: {balance:.2f} USDT")
     n = 0
     last_buy_time = None
 
     while True:
         try:
-            with lock:
-                positions = load_positions(symbol)
+            # Intento no bloqueante sobre el lock (máx 1s)
+            positions = None
+            acquired = lock.acquire(timeout=1.0)
+            if acquired:
+                try:
+                    positions = load_positions(symbol)
+                    positions_cache = positions  # actualizar cache
+                finally:
+                    lock.release()
+            else:
+                positions = positions_cache  # usar último snapshot
 
             data = get_data_binance(symbol)
-            df = cal_metrics_technig(data,14, 10, 20)
+            df = cal_metrics_technig(data, 14, 10, 20)
             close_price = df['close'].iloc[-1]
             high = df['high'].iloc[-1]
             low = df['low'].iloc[-1]
@@ -433,86 +769,84 @@ def run_strategy(symbol, lock):
             rsi = df['rsi'].iloc[-1]
             stochrsi_k = df['stochrsi_k'].iloc[-1]
             stochrsi_d = df['stochrsi_d'].iloc[-1]
-            volatility = (high - low) / open_price * 100  # Calcular volatilidad en porcentaje
+            volatility = (high - low) / open_price * 100 if open_price else 0
             timestamp = df['timestamp'].iloc[-1]
-            print(f'Último precio: {close_price:.2f} {symbol} | Volatilidad: {volatility:.2f}% | rsi: {rsi:.2f} | stochrsi_k: {stochrsi_k:.2f} | stochrsi_d: {stochrsi_d:.2f}')
-            # Cooldown check
+
+            logger.info(f"[{symbol}] Precio: {close_price:.4f} | Vol: {volatility:.2f}% | RSI: {rsi:.2f} | Stoch K/D: {stochrsi_k:.2f}/{stochrsi_d:.2f} | Posiciones: {len(positions)}")
+
+            # Cooldown
             now = time.time()
-            can_buy = True
-            if last_buy_time is not None and (now - last_buy_time) < cooldown_seconds:
-                can_buy = False        
-            # Lógica de compra
-            if (can_buy and rsi < rsi_threshold and 
-                stochrsi_k > stochrsi_d and 
-                balance > min_notional and
-                len(positions) < 5): # Limitar a 5 posiciónes abiertas
+            can_buy = not (last_buy_time and (now - last_buy_time) < cooldown_seconds)
 
-                buy_amount = (balance * position_size) / close_price                
-                buy_amount = ajustar_cantidad(buy_amount, step_size)                
-                respuesta = ejecutar_orden_con_confirmacion('buy', symbol, buy_amount)
-                if respuesta is not None:
-                    new_position = {
-                        'buy_price': close_price,
-                        'amount': buy_amount,
-                        'timestamp': timestamp,
-                        'take_profit': close_price * (1 + take_profit_pct/100),
-                        'stop_loss': close_price * (1 - stop_loss_pct/100)
-                    }
-                    with lock:
-                        positions = load_positions(symbol)  # recargar por seguridad
-                        positions.append(new_position)
-                        save_positions(symbol, positions)
-                balance = get_balance()
-                last_buy_time = time.time()
-                message = (f'📈 COMPRA: {buy_amount:.6f} {symbol} a {close_price:.2f} USDT')
-                # Enviar notificación a Telegram
-                send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                log_trade(timestamp, symbol, 'buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )
+            # Intento compra principal
+            executed = False
+            if (can_buy and rsi < rsi_threshold and stochrsi_k > stochrsi_d
+                and balance > min_notional and len(positions) < 5):
 
-            else:
-                if can_buy:
-                    movimiento_mercado = market_change_last_5_intervals(symbol)
-                    if movimiento_mercado <= -5 and len(positions) < 9:
-
-                        buy_amount = (balance * position_size) / close_price                    
-                        buy_amount = ajustar_cantidad(buy_amount, step_size)                    
-                        respuesta = ejecutar_orden_con_confirmacion('buy', symbol, buy_amount)
-                        if respuesta is not None:
-                            new_position = {
-                                'buy_price': close_price,
-                                'amount': buy_amount,
-                                'timestamp': timestamp,
-                                'take_profit': close_price * (1 + take_profit_pct/100),
-                                'stop_loss': close_price * (1 - stop_loss_pct/100)
-                            }
-                            with lock:
-                                positions = load_positions(symbol)
-                                positions.append(new_position)
-                                save_positions(symbol, positions)
+                capital_usar = balance * position_size
+                qty, motivo = preparar_cantidad(symbol, capital_usar, close_price)
+                if qty is None:
+                    logger.info(f"[{symbol}] Skip compra (condición principal): {motivo}")
+                else:
+                    debug_symbol_filters(symbol)
+                    resp = ejecutar_orden_con_confirmacion('buy', symbol, qty)
+                    if resp:
+                        new_position = {
+                            'buy_price': close_price,
+                            'amount': qty,
+                            'timestamp': timestamp,
+                            'take_profit': close_price * (1 + take_profit_pct / 100),
+                            'stop_loss': close_price * (1 - stop_loss_pct / 100)
+                        }
+                        with lock:
+                            current = load_positions(symbol)
+                            current.append(new_position)
+                            save_positions(symbol, current)
                         balance = get_balance()
                         last_buy_time = time.time()
-                        message = (f'📈 COMPRA: {buy_amount:.6f} {symbol} a {close_price:.2f} USDT por caida de precio {movimiento_mercado}%')
-                        # Enviar notificación a Telegram
-                        send_event_to_telegram(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                        log_trade(timestamp, symbol, 'buy', close_price, buy_amount, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY' )                
+                        send_event_to_telegram(f'📈 COMPRA {symbol}: {qty:.6f} @ {close_price:.4f}', TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                        log_trade(timestamp, symbol, 'buy', close_price, qty, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY')
+                        executed = True
 
-            n = n + 1
-            print(n)
-            #send_positions_to_telegram(symbol, data, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-            if n % 6 == 0:  # Cada 6 iteraciones (3 horas aprox.)
-                send_positions_to_telegram(symbol, data, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                print("Enviando posiciones abiertas a Telegram...")
+            # Compra por caída (DCA/reactiva)
+            if (not executed) and can_buy:
+                movimiento = market_change_last_5_intervals(symbol)
+                if movimiento is not None and movimiento <= -5 and len(positions) < 9:
+                    capital_usar = balance * position_size
+                    qty, motivo = preparar_cantidad(symbol, capital_usar, close_price)
+                    if qty is None:
+                        logger.info(f"[{symbol}] Skip compra caída: {motivo}")
+                    else:
+                        debug_symbol_filters(symbol)
+                        resp = ejecutar_orden_con_confirmacion('buy', symbol, qty)
+                        if resp:
+                            new_position = {
+                                'buy_price': close_price,
+                                'amount': qty,
+                                'timestamp': timestamp,
+                                'take_profit': close_price * (1 + take_profit_pct / 100),
+                                'stop_loss': close_price * (1 - stop_loss_pct / 100)
+                            }
+                            with lock:
+                                current = load_positions(symbol)
+                                current.append(new_position)
+                                save_positions(symbol, current)
+                            balance = get_balance()
+                            last_buy_time = time.time()
+                            send_event_to_telegram(f'📉 DCA {symbol}: {qty:.6f} @ {close_price:.4f} caída {movimiento:.2f}%', TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                            log_trade(timestamp, symbol, 'buy', close_price, qty, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY_DCA')
 
+            n += 1
             time.sleep(poll_interval)
-        except Exception as e:
-            print(f'Error en la ejecución: {e}')
-            time.sleep(5)  # Esperar antes de reintentar
 
-# Ejecutar estrategia en tiempo real
+        except Exception as e:
+            logger.exception(f"[{symbol}] Error en run_strategy")
+            time.sleep(5)
 
 # En tu función principal:
 if __name__ == "__main__":
-    locks = {symbol: threading.Lock() for symbol in SYMBOLS}    
+    locks = {symbol: threading.Lock() for symbol in SYMBOLS}
+    logger.info(f"Iniciando bot con símbolos: {SYMBOLS}")    
     with ThreadPoolExecutor(max_workers=(len(SYMBOLS) * 2) + 1) as executor:
         for symbol in SYMBOLS:
             executor.submit(monitoring_open_position, symbol, locks[symbol])
