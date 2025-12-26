@@ -1,0 +1,19 @@
+2025-12-23 20:49:25,174 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:37:08,410 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:37:08,426 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:37:08,430 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2025-12-26 03:37:08,457 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2025-12-26 03:37:08,460 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2025-12-26 03:37:08,466 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2025-12-26 03:37:33,566 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:37:33,571 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:37:33,574 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2025-12-26 03:37:33,576 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2025-12-26 03:37:33,576 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2025-12-26 03:37:33,579 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2025-12-26 03:38:46,047 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:38:46,055 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2025-12-26 03:38:46,058 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2025-12-26 03:38:46,060 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2025-12-26 03:38:46,061 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2025-12-26 03:38:46,063 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0

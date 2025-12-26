@@ -29,9 +29,11 @@ Este proyecto implementa un bot de trading automatizado en Python para operar cr
 
 - **Python 3.x**
 - **Librerías Python:**
-    - `binance-connector` (o `python-binance` si usas una versión anterior)
+    - `python-binance`
     - `pandas`
     - `ta` (Technical Analysis library)
+    - `python-dotenv`
+    - `requests`
     - `os` (built-in)
     - `logging` (built-in)
     - `decimal` (built-in)
@@ -43,26 +45,42 @@ Este proyecto implementa un bot de trading automatizado en Python para operar cr
 
 ## 5. Configuración
 
-Los parámetros principales de la estrategia están definidos al inicio del script. Se recomienda usar variables de entorno para los sensibles (API keys) y los que pueden cambiar entre entornos (ej. Testnet vs. Producción).
+El bot usa variables de entorno (idealmente desde un archivo `.env`) para credenciales y parámetros de estrategia.
 
-- `binance_api_key`: Tu clave API de Binance Testnet.
-- `binance_api_secret`: Tu clave secreta API de Binance Testnet.
-- `symbol`: Par de trading (ej. `'BTCUSDT'`, `'XRPUSDT'`). Se recomienda usar una variable de entorno para esto.
-- `rsi_threshold`: Umbral de RSI para la compra (ej. 40).
-- `take_profit_pct`: Porcentaje de Take Profit (ej. 4 para 4%).
-- `stop_loss_pct`: Porcentaje de Stop Loss (ej. 10 para 10%).
-- `position_size`: Porcentaje del balance de USDT a usar en cada compra (ej. 0.05 para 5%).
-- `timeframe`: Intervalo de las velas (ej. `'1h'` para 1 hora).
-- `step_size`: Valor mínimo de incremento para la cantidad del activo. Este valor es crítico y debe obtenerse de los filtros LOT_SIZE de las reglas de intercambio de Binance para el par específico. En el código se usa un valor fijo, lo ideal sería obtenerlo dinámicamente de la API (`client.get_symbol_info(symbol)`).
+### 5.1. Quickstart
+
+1) Instala dependencias:
+
+```bash
+pip install -r requirements.txt
+```
+
+2) Crea tu `.env` usando `.env.example` como base.
+
+3) Ejecuta:
+
+```bash
+python bot_trading_v2.py
+```
+
+Variables principales:
+
+- `BINANCE_API_KEY` / `BINANCE_API_SECRET`: credenciales API.
+- `BINANCE_TESTNET`: `true`/`false`.
+- `SYMBOLS`: lista separada por comas (ej. `BTCUSDT,ETHUSDT`).
+- `TIMEFRAME`: intervalo de velas (ej. `1h`).
+- `POLL_INTERVAL_SECONDS`: frecuencia del loop de estrategia.
+- `RSI_THRESHOLD`, `TAKE_PROFIT_PCT`, `STOP_LOSS_PCT`, `TRAILING_TAKE_PROFIT_PCT`, `TRAILING_STOP_PCT`, `POSITION_SIZE`.
+- Telegram (opcional): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
 ---
 
 ## 6. Archivos Generados
 
-El bot creará y gestionará dos archivos CSV dentro de la carpeta `./files`:
+El bot crea archivos por símbolo dentro de la carpeta `./files`:
 
-- `./files/trading_log.csv`: Registra cada compra y venta con fecha, tipo de operación, precio, cantidad, ganancia, volatilidad, RSI, StochRSI y una descripción.
-- `./files/open_positions.csv`: Almacena las posiciones que el bot ha abierto y aún no ha cerrado (precio de compra, cantidad, timestamp). Esto permite persistir el estado del bot.
+- `./files/trading_log_<SYMBOL>.csv`: operaciones (CSV estándar; si ya existía con `|`, mantiene ese delimitador por compatibilidad).
+- `./files/open_positions_<SYMBOL>.csv`: posiciones abiertas por símbolo.
 
 ---
 

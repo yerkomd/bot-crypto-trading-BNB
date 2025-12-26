@@ -7,7 +7,6 @@ binance-connector==3.12.0
 certifi==2025.6.15
 charset-normalizer==3.4.2
 dateparser==1.2.2
-dotenv==0.9.9
 frozenlist==1.7.0
 h11==0.16.0
 httpcore==1.0.9
@@ -15,7 +14,6 @@ httpx==0.28.1
 idna==3.10
 multidict==6.6.3
 numpy==2.3.1
-panda==0.3.1
 pandas==2.3.0
 propcache==0.3.2
 pycryptodome==3.23.0

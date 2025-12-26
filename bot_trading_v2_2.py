@@ -250,13 +250,40 @@ def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
     macd_indicator = ta.trend.MACD(df['close'])
     df['macd'] = macd_indicator.macd()
     df['macd_signal'] = macd_indicator.macd_signal()
+
+    # Métricas extra para detección de régimen de mercado
+    # EMA200 (tendencia de largo plazo)
+    try:
+        df['ema200'] = ta.trend.EMAIndicator(df['close'], window=200).ema_indicator()
+    except Exception:
+        df['ema200'] = pd.NA
+
+    # ADX (fuerza de tendencia)
+    try:
+        adx_indicator = ta.trend.ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
+        df['adx'] = adx_indicator.adx()
+    except Exception:
+        df['adx'] = pd.NA
+
     return df
 
 # Función para guardar logs de operaciones para análisis ML
 
-def log_trade(timestamp, symbol, trade_type, price, amount, profit, volatility, rsi, stochrsi_k, stochrsi_d, description):
+def log_trade(timestamp, symbol, trade_type, price, amount, profit, volatility, rsi, stochrsi_k, stochrsi_d, description, extra: dict | None = None):
     log_filename = get_log_filename(symbol)
-    fieldnames = ['fecha', 'symbol', 'trade_type', 'price', 'amount', 'profit', 'volatility', 'rsi', 'stochrsi_k', 'stochrsi_d', 'description']
+    fieldnames = [
+        'fecha', 'symbol', 'trade_type', 'price', 'amount', 'profit', 'volatility',
+        'rsi', 'stochrsi_k', 'stochrsi_d', 'description',
+        # Contexto de estrategia (puede ser vacío en registros antiguos)
+        'regime',
+        'rsi_threshold_used',
+        'take_profit_pct_used',
+        'stop_loss_pct_used',
+        'trailing_tp_pct_used',
+        'trailing_sl_pct_used',
+        'buy_cooldown_used',
+        'position_size_used',
+    ]
 
     delimiter = ','
     if os.path.exists(log_filename) and os.stat(log_filename).st_size > 0:
@@ -269,6 +296,7 @@ def log_trade(timestamp, symbol, trade_type, price, amount, profit, volatility, 
             delimiter = ','
 
     file_exists = os.path.exists(log_filename) and os.stat(log_filename).st_size > 0
+    extra = extra or {}
     row = {
         'fecha': str(timestamp),
         'symbol': symbol,
@@ -281,6 +309,15 @@ def log_trade(timestamp, symbol, trade_type, price, amount, profit, volatility, 
         'stochrsi_k': stochrsi_k,
         'stochrsi_d': stochrsi_d,
         'description': description,
+
+        'regime': extra.get('regime'),
+        'rsi_threshold_used': extra.get('rsi_threshold_used'),
+        'take_profit_pct_used': extra.get('take_profit_pct_used'),
+        'stop_loss_pct_used': extra.get('stop_loss_pct_used'),
+        'trailing_tp_pct_used': extra.get('trailing_tp_pct_used'),
+        'trailing_sl_pct_used': extra.get('trailing_sl_pct_used'),
+        'buy_cooldown_used': extra.get('buy_cooldown_used'),
+        'position_size_used': extra.get('position_size_used'),
     }
 
     with open(log_filename, 'a', newline='') as wf:
@@ -361,17 +398,16 @@ def market_change_last_5_intervals(symbol):
     df['open'] = df['open'].astype(float)
     df['close'] = df['close'].astype(float)
 
-    percent_changes = []
-    for i in range(len(df)):
-        open_price = df['open'].iloc[i]
-        close_price = df['close'].iloc[i]
-        percent_change = ((close_price - open_price) / open_price) * 100
-        percent_changes.append(percent_change)
-
-    # suma los cambios de los %, si la sumatoria es positiva, el mercado está en tendencia alcista
-    sum_changes = sum(percent_changes)
-
-    return sum_changes
+    # En vez de sumar retornos por vela (puede distorsionar), calcula el retorno acumulado
+    # desde la primera apertura hasta el último cierre.
+    if df.empty:
+        return 0.0
+    first_open = float(df['open'].iloc[0])
+    last_close = float(df['close'].iloc[-1])
+    if first_open == 0:
+        return 0.0
+    cumulative_change = ((last_close - first_open) / first_open) * 100
+    return cumulative_change
 # Obtener precio actual directamente desde Binance
 def get_precio_actual(symbol):
     try:
@@ -541,13 +577,24 @@ def monitoring_open_position(symbol, lock):
                 buy_price = position['buy_price']
                 amount = position['amount']
 
+                # Trailing por posición (solo si fue creada con parámetros por régimen)
+                # Si no existe, mantiene el comportamiento anterior usando variables globales.
+                try:
+                    trailing_tp = float(position.get('trailing_tp_pct', trailing_take_profit_pct))
+                except Exception:
+                    trailing_tp = trailing_take_profit_pct
+                try:
+                    trailing_sl = float(position.get('trailing_sl_pct', trailing_stop_pct))
+                except Exception:
+                    trailing_sl = trailing_stop_pct
+
                 if close_price >= take_profit:
                     # actualizar trailing objetivos (se aplicará bajo lock)
                     to_update.append({
                         'match': {'buy_price': buy_price, 'timestamp': str(position['timestamp'])},
                         'fields': {
-                            'take_profit': close_price * (1 + trailing_take_profit_pct / 100),
-                            'stop_loss': close_price * (1 - trailing_stop_pct / 100),
+                            'take_profit': close_price * (1 + trailing_tp / 100),
+                            'stop_loss': close_price * (1 - trailing_sl / 100),
                         }
                     })
                 elif close_price <= stop_loss:
@@ -634,7 +681,21 @@ def monitoring_open_position(symbol, lock):
                 emoji = '🎯' if reason == 'TAKE PROFIT' else '🚨'
                 msg = f'{emoji} {reason}: Vendemos {sell_qty:.6f} {symbol} a {close_price:.4f} USDT'
                 send_event_to_telegram(msg, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                log_trade(timestamp, symbol, 'sell', close_price, sell_qty, (close_price - removed['buy_price']) * sell_qty, volatility, rsi, stochrsi_k, stochrsi_d, reason)
+                log_trade(
+                    timestamp, symbol, 'sell', close_price, sell_qty,
+                    (close_price - removed['buy_price']) * sell_qty,
+                    volatility, rsi, stochrsi_k, stochrsi_d, reason,
+                    extra={
+                        'regime': removed.get('regime'),
+                        'rsi_threshold_used': removed.get('rsi_threshold'),
+                        'take_profit_pct_used': None,
+                        'stop_loss_pct_used': None,
+                        'trailing_tp_pct_used': removed.get('trailing_tp_pct'),
+                        'trailing_sl_pct_used': removed.get('trailing_sl_pct'),
+                        'buy_cooldown_used': None,
+                        'position_size_used': None,
+                    }
+                )
 
         except Exception:
             logger.exception(f"[{symbol}] Error en monitoring_open_position")
@@ -705,8 +766,20 @@ def listen_telegram_commands(token, chat_id, symbols, locks):
                                     continue
                                 resp = ejecutar_orden_con_confirmacion('sell', symbol, sell_qty)
                                 if resp:
-                                    log_trade(pd.Timestamp.now(), symbol, 'sell', price, sell_qty,
-                                              (price - position['buy_price']) * sell_qty, 0, 0, 0, 0, 'SELL ALL')
+                                    log_trade(
+                                        pd.Timestamp.now(), symbol, 'sell', price, sell_qty,
+                                        (price - position['buy_price']) * sell_qty, 0, 0, 0, 0, 'SELL ALL',
+                                        extra={
+                                            'regime': position.get('regime'),
+                                            'rsi_threshold_used': position.get('rsi_threshold'),
+                                            'take_profit_pct_used': None,
+                                            'stop_loss_pct_used': None,
+                                            'trailing_tp_pct_used': position.get('trailing_tp_pct'),
+                                            'trailing_sl_pct_used': position.get('trailing_sl_pct'),
+                                            'buy_cooldown_used': None,
+                                            'position_size_used': None,
+                                        }
+                                    )
                         send_event_to_telegram(f"🚨 Todas las posiciones vendidas.", token, chat_id)
 
                     elif text == "/stop":
@@ -829,12 +902,23 @@ def preparar_cantidad(symbol, usd_balance_frac, price, filters: dict | None = No
         filters = filters or get_symbol_filters(symbol)
     except Exception as e:
         return None, f"no symbol filters ({e})"
+    if not price or price <= 0:
+        return None, f"invalid price ({price})"
+
     raw_qty = usd_balance_frac / price
     step = filters['step_size']
-    # Ajustar con floor al múltiplo válido (evita .quantize errores por representaciones binarias)
-    from math import floor
-    steps = floor(raw_qty / step)
-    qty = steps * step
+
+    # Ajustar con Decimal para evitar errores binarios y rechazos por LOT_SIZE.
+    qty = floor_to_step(raw_qty, step)
+
+    # Respetar max_qty si existe
+    try:
+        max_qty = float(filters.get('max_qty', 0) or 0)
+        if max_qty > 0 and qty > max_qty:
+            qty = floor_to_step(max_qty, step)
+    except Exception:
+        pass
+
     qty = float(f"{qty:.15f}")  # normalizar
     if qty < filters['min_qty']:
         return None, f"qty < min_qty ({qty} < {filters['min_qty']})"
@@ -848,6 +932,72 @@ def debug_symbol_filters(symbol):
     f = get_symbol_filters(symbol)
     logger.debug(f"Filtros {symbol}: min_qty={f['min_qty']} step={f['step_size']} max_qty={f['max_qty']} min_notional={f['min_notional']}")
 
+def detect_market_regime(df):
+    """Detecta el régimen del mercado (BULL/BEAR/LATERAL) usando EMA200 y ADX.
+
+    Si no hay datos suficientes o hay NaN, retorna LATERAL.
+    """
+    try:
+        if df is None or df.empty:
+            return "LATERAL"
+        if 'close' not in df.columns or 'ema200' not in df.columns or 'adx' not in df.columns:
+            return "LATERAL"
+
+        price = df['close'].iloc[-1]
+        ema200 = df['ema200'].iloc[-1]
+        adx = df['adx'].iloc[-1]
+
+        if pd.isna(price) or pd.isna(ema200) or pd.isna(adx):
+            return "LATERAL"
+
+        if price > ema200 and adx >= 25:
+            return "BULL"
+        elif price < ema200 and adx >= 25:
+            return "BEAR"
+        else:
+            return "LATERAL"
+    except Exception:
+        return "LATERAL"
+
+
+# Parámetros de estrategia por régimen de mercado.
+# Nota: Se aplican SOLO a operaciones nuevas. Las posiciones ya abiertas mantienen sus
+# niveles (take_profit/stop_loss) y, si no tienen trailing por posición, usan el trailing global.
+BULL = {
+    "RSI_THRESHOLD": 45,
+    "TAKE_PROFIT_PCT": 5,
+    "STOP_LOSS_PCT": 2,
+    "TRAILING_TP_PCT": 1.2,
+    "TRAILING_SL_PCT": 1.0,
+    "BUY_COOLDOWN": 7200,      # 2h
+    "POSITION_SIZE": 0.04
+}
+
+BEAR = {
+    "RSI_THRESHOLD": 30,
+    "TAKE_PROFIT_PCT": 2,
+    "STOP_LOSS_PCT": 1.2,
+    "TRAILING_TP_PCT": 0.8,
+    "TRAILING_SL_PCT": 0.6,
+    "BUY_COOLDOWN": 21600,     # 6h
+    "POSITION_SIZE": 0.015
+}
+
+LATERAL = {
+    "RSI_THRESHOLD": 40,
+    "TAKE_PROFIT_PCT": 3,
+    "STOP_LOSS_PCT": 1.5,
+    "TRAILING_TP_PCT": 0.9,
+    "TRAILING_SL_PCT": 0.8,
+    "BUY_COOLDOWN": 14400,     # 4h
+    "POSITION_SIZE": 0.03
+}
+
+REGIME_PARAMS = {
+    "BULL": BULL,
+    "BEAR": BEAR,
+    "LATERAL": LATERAL,
+}
 
 # Ejecutar la estrategia en tiempo real
 def run_strategy(symbol, lock):
@@ -858,6 +1008,13 @@ def run_strategy(symbol, lock):
     n = 0
     last_buy_time = None
     positions_cache = []
+
+    # Cachear filtros por símbolo para evitar llamadas repetidas
+    try:
+        symbol_filters = get_symbol_filters(symbol)
+    except Exception as e:
+        logger.warning(f"[{symbol}] No se pudieron obtener filtros de símbolo: {e}")
+        symbol_filters = None
 
     while not STOP_EVENT.is_set():
         try:
@@ -873,31 +1030,56 @@ def run_strategy(symbol, lock):
             else:
                 positions = positions_cache  # usar último snapshot
 
-            data = get_data_binance(symbol, interval=timeframe)
+            # Pedimos más histórico para poder calcular EMA200/ADX y detectar régimen.
+            data = get_data_binance(symbol, interval=timeframe, limit=260)
             df = cal_metrics_technig(data, 14, 10, 20)
             close_price = df['close'].iloc[-1]
-            high = df['high'].iloc[-1]
-            low = df['low'].iloc[-1]
-            open_price = df['open'].iloc[-1]
-            rsi = df['rsi'].iloc[-1]
-            stochrsi_k = df['stochrsi_k'].iloc[-1]
-            stochrsi_d = df['stochrsi_d'].iloc[-1]
+            high = df['high'].iloc[-2]
+            low = df['low'].iloc[-2]
+            open_price = df['open'].iloc[-2]
+            rsi = df['rsi'].iloc[-2]
+            stochrsi_k = df['stochrsi_k'].iloc[-2]
+            stochrsi_d = df['stochrsi_d'].iloc[-2]
             volatility = (high - low) / open_price * 100 if open_price else 0
-            timestamp = df['timestamp'].iloc[-1]
+            timestamp = df['timestamp'].iloc[-2]
+
+            # Guardas: si indicadores aún no están disponibles, no operar
+            if pd.isna(rsi) or pd.isna(stochrsi_k) or pd.isna(stochrsi_d):
+                logger.warning(f"[{symbol}] Indicadores no disponibles (NaN). Omitiendo ciclo.")
+                STOP_EVENT.wait(poll_interval)
+                continue
 
             logger.info(f"[{symbol}] Precio: {close_price:.4f} | Vol: {volatility:.2f}% | RSI: {rsi:.2f} | Stoch K/D: {stochrsi_k:.2f}/{stochrsi_d:.2f} | Posiciones: {len(positions)}")
 
+            # Detectar régimen usando última vela cerrada (evita lookahead)
+            regime = detect_market_regime(df.iloc[:-1])
+            params = REGIME_PARAMS.get(regime, LATERAL)
+            rsi_threshold_active = float(params["RSI_THRESHOLD"])
+            take_profit_pct_active = float(params["TAKE_PROFIT_PCT"])
+            stop_loss_pct_active = float(params["STOP_LOSS_PCT"])
+            trailing_tp_pct_active = float(params["TRAILING_TP_PCT"])
+            trailing_sl_pct_active = float(params["TRAILING_SL_PCT"])
+            cooldown_seconds_active = int(params["BUY_COOLDOWN"])
+            position_size_active = float(params["POSITION_SIZE"])
+
             # Cooldown
             now = time.time()
-            can_buy = not (last_buy_time and (now - last_buy_time) < cooldown_seconds)
+            can_buy = not (last_buy_time and (now - last_buy_time) < cooldown_seconds_active)
+
+            # Refrescar balance solo cuando sea relevante (evita llamadas constantes)
+            if can_buy:
+                balance = get_balance()
+
+            # Preferir min_notional real del símbolo si está disponible
+            symbol_min_notional = (symbol_filters or {}).get('min_notional', min_notional)
 
             # Intento compra principal
             executed = False
-            if (can_buy and rsi < rsi_threshold and stochrsi_k > stochrsi_d
-                and balance > min_notional and len(positions) < 5):
+            if (can_buy and rsi < rsi_threshold_active and stochrsi_k > stochrsi_d
+                and balance > symbol_min_notional and len(positions) < 5):
 
-                capital_usar = balance * position_size
-                qty, motivo = preparar_cantidad(symbol, capital_usar, close_price)
+                capital_usar = balance * position_size_active
+                qty, motivo = preparar_cantidad(symbol, capital_usar, close_price, filters=symbol_filters)
                 if qty is None:
                     logger.info(f"[{symbol}] Skip compra (condición principal): {motivo}")
                 else:
@@ -908,8 +1090,13 @@ def run_strategy(symbol, lock):
                             'buy_price': close_price,
                             'amount': qty,
                             'timestamp': timestamp,
-                            'take_profit': close_price * (1 + take_profit_pct / 100),
-                            'stop_loss': close_price * (1 - stop_loss_pct / 100)
+                            'take_profit': close_price * (1 + take_profit_pct_active / 100),
+                            'stop_loss': close_price * (1 - stop_loss_pct_active / 100),
+                            # Congelar parámetros por posición (solo para posiciones nuevas)
+                            'regime': regime,
+                            'rsi_threshold': rsi_threshold_active,
+                            'trailing_tp_pct': trailing_tp_pct_active,
+                            'trailing_sl_pct': trailing_sl_pct_active,
                         }
                         with lock:
                             current = load_positions(symbol)
@@ -918,15 +1105,28 @@ def run_strategy(symbol, lock):
                         balance = get_balance()
                         last_buy_time = time.time()
                         send_event_to_telegram(f'📈 COMPRA {symbol}: {qty:.6f} @ {close_price:.4f}', TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                        log_trade(timestamp, symbol, 'buy', close_price, qty, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY')
+                        log_trade(
+                            timestamp, symbol, 'buy', close_price, qty, 0,
+                            volatility, rsi, stochrsi_k, stochrsi_d, 'BUY',
+                            extra={
+                                'regime': regime,
+                                'rsi_threshold_used': rsi_threshold_active,
+                                'take_profit_pct_used': take_profit_pct_active,
+                                'stop_loss_pct_used': stop_loss_pct_active,
+                                'trailing_tp_pct_used': trailing_tp_pct_active,
+                                'trailing_sl_pct_used': trailing_sl_pct_active,
+                                'buy_cooldown_used': cooldown_seconds_active,
+                                'position_size_used': position_size_active,
+                            }
+                        )
                         executed = True
 
             # Compra por caída (DCA/reactiva)
             if (not executed) and can_buy:
                 movimiento = market_change_last_5_intervals(symbol)
-                if movimiento is not None and balance > min_notional and movimiento <= -5 and len(positions) < 9:
-                    capital_usar = balance * position_size
-                    qty, motivo = preparar_cantidad(symbol, capital_usar, close_price)
+                if movimiento is not None and balance > symbol_min_notional and movimiento <= -5 and len(positions) < 9:
+                    capital_usar = balance * position_size_active
+                    qty, motivo = preparar_cantidad(symbol, capital_usar, close_price, filters=symbol_filters)
                     if qty is None:
                         logger.info(f"[{symbol}] Skip compra caída: {motivo}")
                     else:
@@ -937,8 +1137,13 @@ def run_strategy(symbol, lock):
                                 'buy_price': close_price,
                                 'amount': qty,
                                 'timestamp': timestamp,
-                                'take_profit': close_price * (1 + take_profit_pct / 100),
-                                'stop_loss': close_price * (1 - stop_loss_pct / 100)
+                                'take_profit': close_price * (1 + take_profit_pct_active / 100),
+                                'stop_loss': close_price * (1 - stop_loss_pct_active / 100),
+                                # Congelar parámetros por posición (solo para posiciones nuevas)
+                                'regime': regime,
+                                'rsi_threshold': rsi_threshold_active,
+                                'trailing_tp_pct': trailing_tp_pct_active,
+                                'trailing_sl_pct': trailing_sl_pct_active,
                             }
                             with lock:
                                 current = load_positions(symbol)
@@ -947,9 +1152,21 @@ def run_strategy(symbol, lock):
                             balance = get_balance()
                             last_buy_time = time.time()
                             send_event_to_telegram(f'📉 DCA {symbol}: {qty:.6f} @ {close_price:.4f} caída {movimiento:.2f}%', TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                            log_trade(timestamp, symbol, 'buy', close_price, qty, 0, volatility, rsi, stochrsi_k, stochrsi_d, 'BUY_DCA')
-
-            n += 1
+                            log_trade(
+                                timestamp, symbol, 'buy', close_price, qty, 0,
+                                volatility, rsi, stochrsi_k, stochrsi_d, 'BUY_DCA',
+                                extra={
+                                    'regime': regime,
+                                    'rsi_threshold_used': rsi_threshold_active,
+                                    'take_profit_pct_used': take_profit_pct_active,
+                                    'stop_loss_pct_used': stop_loss_pct_active,
+                                    'trailing_tp_pct_used': trailing_tp_pct_active,
+                                    'trailing_sl_pct_used': trailing_sl_pct_active,
+                                    'buy_cooldown_used': cooldown_seconds_active,
+                                    'position_size_used': position_size_active,
+                                }
+                            )
+            
             STOP_EVENT.wait(poll_interval)
 
         except Exception as e:
