@@ -120,7 +120,7 @@ def ajustar_cantidad(cantidad, step_size):
     cantidad_ajustada = cantidad_dec.quantize(factor, rounding=ROUND_DOWN)
     return float(cantidad_ajustada)
 
-#Calculo de metricas tecnicas para el traiding
+#Calculo de metricas tecnicas para el trading
 
 def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
 
