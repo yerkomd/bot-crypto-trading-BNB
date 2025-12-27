@@ -226,7 +226,7 @@ def get_data_binance(symbol, interval='1h', limit=40):
     df['volume'] = df['volume'].astype(float)    
     return df
 
-#Calculo de metricas tecnicas para el traiding
+#Calculo de metricas tecnicas para el trading
 
 def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
 
