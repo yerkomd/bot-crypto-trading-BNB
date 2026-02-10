@@ -17,3 +17,19 @@
 2025-12-26 03:38:46,060 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
 2025-12-26 03:38:46,061 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
 2025-12-26 03:38:46,063 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-01-25 12:46:15,838 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-01-25 12:46:15,842 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-01-25 12:46:15,848 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-01-25 12:46:15,848 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-01-25 12:46:15,851 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-01-25 12:46:15,851 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-01-25 12:46:15,852 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-01-25 12:51:41,883 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-01-25 12:51:41,886 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-01-25 12:51:41,888 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-01-25 12:51:41,888 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-01-25 12:51:41,890 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-01-25 12:51:41,890 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-01-25 12:51:41,891 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-07 20:48:32,945 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-07 20:48:32,952 WARNING [MainThread] bot_trading_v3_1: EMA200 no disponible con el historial actual (se requieren 200 velas). Usando fallback ewm; velas=40. Si estás en BINANCE_TESTNET, es normal que el histórico sea limitado.

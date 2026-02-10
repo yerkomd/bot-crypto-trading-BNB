@@ -1,5 +1,62 @@
 # Diagrama de Secuencia del Bot de Trading
 
+## PostgreSQL (single source of truth)
+
+Desde `bot_trading_v3_1.py` el bot **NO usa CSV** para:
+- Posiciones abiertas
+- Historial de trades
+
+PostgreSQL es la **única fuente de verdad**. El esquema/tablas se crean de forma idempotente al arrancar.
+
+Archivos relevantes:
+- [db/schema.sql](db/schema.sql): SQL idempotente (schema `trading` + tablas + índices)
+- [db/connection.py](db/connection.py): pool, transacciones explícitas y reconexión
+- [db/schema.py](db/schema.py): aplica el SQL al arrancar
+- [repositories/open_positions_repo.py](repositories/open_positions_repo.py)
+- [repositories/trade_history_repo.py](repositories/trade_history_repo.py)
+- [repositories/equity_repo.py](repositories/equity_repo.py)
+
+### Variables de entorno (OBLIGATORIAS)
+
+En tu `.env`:
+
+```dotenv
+USE_DATABASE=true
+POSTGRES_HOST=...
+POSTGRES_PORT=5432
+POSTGRES_DB=...
+POSTGRES_USER=...
+POSTGRES_PASSWORD=...
+
+# Snapshots de equity cada N segundos
+EQUITY_SNAPSHOT_INTERVAL=300
+```
+
+Si `USE_DATABASE` no está en `true`, el bot no debería ejecutarse en producción (se deshabilitó la persistencia por archivos).
+
+### Ejemplos de consultas (reales)
+
+```sql
+-- Posiciones abiertas (estado vivo)
+SELECT *
+FROM trading.open_positions
+WHERE symbol = 'BNBUSDT'
+ORDER BY opened_at;
+
+-- Historial completo de trades
+SELECT symbol, side, reason, buy_price, sell_price, realized_pnl, executed_at
+FROM trading.trade_history
+WHERE symbol = 'BNBUSDT'
+ORDER BY executed_at DESC
+LIMIT 200;
+
+-- Equity curve / snapshots
+SELECT timestamp, equity_total, usdt_balance, positions_value
+FROM trading.equity_snapshots
+ORDER BY timestamp DESC
+LIMIT 100;
+```
+
 
 ## 1. Título del Proyecto
 

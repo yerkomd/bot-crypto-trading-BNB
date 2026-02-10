@@ -13,6 +13,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import signal
 import csv
+from dataclasses import dataclass
+from datetime import datetime, timezone, date
 
 # Cargar variables de entorno desde un archivo .env (no toca red; seguro para imports/tests)
 load_dotenv()
@@ -92,6 +94,27 @@ min_notional = float(os.getenv('MIN_NOTIONAL', 10))
 # Variables para control de frecuencia de compras
 cooldown_seconds = int(os.getenv('BUY_COOLDOWN_SECONDS', '5400'))  # 90 min por defecto
 poll_interval = int(os.getenv('POLL_INTERVAL_SECONDS', '30'))      # frecuencia de chequeo
+
+# --- Estrategia / Riesgo (nuevo, sin cambiar arquitectura) ---
+ATR_WINDOW = int(os.getenv('ATR_WINDOW', '14'))
+
+RSI_CONFIRM_MIN = float(os.getenv('RSI_CONFIRM_MIN', '35'))
+RSI_CONFIRM_MAX = float(os.getenv('RSI_CONFIRM_MAX', '55'))
+
+MAX_SYMBOL_DRAWDOWN_FRAC = float(os.getenv('MAX_SYMBOL_DRAWDOWN_FRAC', '0.06'))  # 6%
+MAX_CAPITAL_COMMITTED_FRAC = float(os.getenv('MAX_CAPITAL_COMMITTED_FRAC', '0.15'))  # 15% del equity total
+DAILY_LOSS_LIMIT_FRAC = float(os.getenv('DAILY_LOSS_LIMIT_FRAC', '0.03'))  # 3% del equity total (día)
+SYMBOL_COOLDOWN_AFTER_DAILY_LOSS_SECONDS = int(os.getenv('SYMBOL_COOLDOWN_AFTER_DAILY_LOSS_SECONDS', str(24 * 3600)))
+
+# DCA: por defecto desactivado (evita martingala). Se puede activar explícitamente.
+ENABLE_DCA = str(os.getenv('ENABLE_DCA', '0')).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+# Multiplicadores ATR por régimen: TP/SL y trailing-stop (solo para nuevas posiciones)
+ATR_MULTIPLIERS = {
+    "BULL": {"tp": 2.5, "sl": 1.5, "trailing_sl": 1.2},
+    "LATERAL": {"tp": 2.0, "sl": 1.2, "trailing_sl": 1.0},
+    "BEAR": None,
+}
 
 # Si hay balance bloqueado en órdenes abiertas, un STOP LOSS podría no poder vender.
 # Si activas esta opción, el bot intentará cancelar órdenes abiertas del símbolo para liberar balance.
@@ -266,6 +289,19 @@ def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
     except Exception:
         df['ema200'] = pd.NA
 
+    # EMA50 (tendencia intermedia para filtro de entradas)
+    try:
+        df['ema50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
+    except Exception:
+        df['ema50'] = pd.NA
+
+    # ATR (volatilidad) para TP/SL dinámicos
+    try:
+        atr_indicator = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=ATR_WINDOW)
+        df['atr'] = atr_indicator.average_true_range()
+    except Exception:
+        df['atr'] = pd.NA
+
     # ADX (fuerza de tendencia)
     try:
         adx_indicator = ta.trend.ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14)
@@ -274,6 +310,244 @@ def cal_metrics_technig(df, rsi_w, sma_short_w, sma_long_w):
         df['adx'] = pd.NA
 
     return df
+
+
+def calculate_atr_levels(buy_price: float, atr: float, tp_multiplier: float, sl_multiplier: float) -> tuple[float, float]:
+    """Calcula niveles dinámicos por ATR para TP/SL."""
+    tp = buy_price + (atr * tp_multiplier)
+    sl = buy_price - (atr * sl_multiplier)
+    return tp, sl
+
+
+def update_trailing_stop_atr(position: dict, close_price: float, atr: float, trailing_sl_multiplier: float) -> bool:
+    """Actualiza max_price y stop_loss por ATR sin mover stop hacia abajo.
+
+    Reglas:
+    - max_price solo sube
+    - stop_loss nunca baja
+    - trailing requiere position['trailing_active'] == True
+    """
+    if not position.get('trailing_active'):
+        return False
+
+    buy_price = float(position.get('buy_price', 0.0) or 0.0)
+    prev_max = float(position.get('max_price', buy_price) or buy_price)
+    new_max = max(prev_max, float(close_price))
+    position['max_price'] = new_max
+
+    try:
+        current_sl = float(position.get('stop_loss', 0.0) or 0.0)
+    except Exception:
+        current_sl = 0.0
+
+    new_stop = new_max - (atr * trailing_sl_multiplier)
+    # Nunca mover stop hacia abajo
+    if current_sl and new_stop < current_sl:
+        return False
+    position['stop_loss'] = max(current_sl, new_stop) if current_sl else new_stop
+    return True
+
+
+def _utc_day_key(ts: datetime | pd.Timestamp | None = None) -> date:
+    if ts is None:
+        return datetime.now(timezone.utc).date()
+    if isinstance(ts, pd.Timestamp):
+        # pandas timestamp puede venir sin tz
+        dt = ts.to_pydatetime()
+    else:
+        dt = ts
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).date()
+
+
+@dataclass
+class SymbolRiskState:
+    day: date
+    day_start_equity: float = 0.0
+    daily_realized_pnl: float = 0.0
+    peak_value: float = 0.0
+    max_daily_drawdown: float = 0.0
+    disabled_until_ts: float = 0.0
+
+    # Métricas instantáneas (observabilidad)
+    committed_capital: float = 0.0
+    current_value: float = 0.0
+    floating_pnl: float = 0.0
+    floating_loss: float = 0.0
+    current_drawdown: float = 0.0
+
+
+class RiskManager:
+    """Gestor de riesgo global por símbolo.
+
+    Se mantiene en memoria (thread-safe) y aplica reglas duras para bloquear entradas.
+    """
+
+    def __init__(self, symbols: list[str]):
+        self._lock = threading.Lock()
+        today = _utc_day_key()
+        self._state: dict[str, SymbolRiskState] = {
+            s: SymbolRiskState(day=today) for s in symbols
+        }
+
+    def _roll_day_if_needed(self, symbol: str, today: date, equity_total: float | None = None):
+        st = self._state[symbol]
+        if st.day != today:
+            self._state[symbol] = SymbolRiskState(day=today, day_start_equity=float(equity_total or 0.0))
+
+    def observe(self, symbol: str, *, positions: list[dict], price: float, equity_total: float, now_ts: float | None = None):
+        """Actualiza métricas de riesgo intradía (peak y drawdown) para el símbolo."""
+        now_ts = float(now_ts or time.time())
+        today = _utc_day_key(datetime.fromtimestamp(now_ts, tz=timezone.utc))
+
+        committed = 0.0
+        current_value = 0.0
+        for p in positions or []:
+            try:
+                bp = float(p.get('buy_price', 0.0) or 0.0)
+                amt = float(p.get('amount', 0.0) or 0.0)
+            except Exception:
+                continue
+            committed += (bp * amt)
+            current_value += (float(price) * amt)
+
+        with self._lock:
+            self._roll_day_if_needed(symbol, today, equity_total)
+            st = self._state[symbol]
+            if st.day_start_equity <= 0:
+                st.day_start_equity = float(equity_total or 0.0)
+
+            st.committed_capital = float(committed)
+            st.current_value = float(current_value)
+            st.floating_pnl = float(current_value - committed)
+            st.floating_loss = float(max(0.0, committed - current_value))
+
+            st.peak_value = max(st.peak_value, current_value)
+            if st.peak_value > 0:
+                dd = max(0.0, (st.peak_value - current_value) / st.peak_value)
+                st.max_daily_drawdown = max(st.max_daily_drawdown, dd)
+                st.current_drawdown = dd
+            else:
+                st.current_drawdown = 0.0
+
+    def record_realized_pnl(self, symbol: str, pnl: float, when: datetime | pd.Timestamp | None = None, *, equity_total: float | None = None):
+        """Registra PnL realizado y aplica regla de pausa 24h por pérdida diaria."""
+        when_dt = when
+        if when_dt is None:
+            when_dt = datetime.now(timezone.utc)
+        today = _utc_day_key(when_dt)
+        now_ts = time.time()
+        with self._lock:
+            self._roll_day_if_needed(symbol, today, equity_total)
+            st = self._state[symbol]
+            st.daily_realized_pnl += float(pnl or 0.0)
+
+            base = st.day_start_equity if st.day_start_equity > 0 else float(equity_total or 0.0)
+            if base > 0:
+                loss_frac = max(0.0, (-st.daily_realized_pnl) / base)
+                if loss_frac >= DAILY_LOSS_LIMIT_FRAC:
+                    st.disabled_until_ts = max(st.disabled_until_ts, now_ts + SYMBOL_COOLDOWN_AFTER_DAILY_LOSS_SECONDS)
+
+    def can_open(self, symbol: str, *, equity_total: float, committed_capital: float, symbol_drawdown: float, now_ts: float | None = None) -> tuple[bool, str | None]:
+        now_ts = float(now_ts or time.time())
+        today = _utc_day_key(datetime.fromtimestamp(now_ts, tz=timezone.utc))
+        with self._lock:
+            self._roll_day_if_needed(symbol, today, equity_total)
+            st = self._state[symbol]
+
+            if st.disabled_until_ts and now_ts < st.disabled_until_ts:
+                remaining = int(st.disabled_until_ts - now_ts)
+                return False, f"símbolo pausado por pérdida diaria ({remaining}s restantes)"
+
+            # Regla: no abrir nuevas posiciones si drawdown actual del símbolo supera umbral
+            if symbol_drawdown > MAX_SYMBOL_DRAWDOWN_FRAC:
+                return False, f"drawdown del símbolo {symbol_drawdown*100:.2f}% > {MAX_SYMBOL_DRAWDOWN_FRAC*100:.2f}%"
+
+            # Regla: no comprometer demasiado del equity total
+            if equity_total > 0 and committed_capital > (equity_total * MAX_CAPITAL_COMMITTED_FRAC):
+                frac = committed_capital / equity_total
+                return False, f"capital comprometido {frac*100:.2f}% > {MAX_CAPITAL_COMMITTED_FRAC*100:.2f}%"
+
+            return True, None
+
+    def snapshot(self, symbol: str, now_ts: float | None = None) -> dict:
+        """Snapshot thread-safe del estado del símbolo."""
+        now_ts = float(now_ts or time.time())
+        today = _utc_day_key(datetime.fromtimestamp(now_ts, tz=timezone.utc))
+        with self._lock:
+            # si cambia el día, el snapshot refleja el reset
+            self._roll_day_if_needed(symbol, today, None)
+            st = self._state[symbol]
+            return {
+                'day': st.day,
+                'day_start_equity': st.day_start_equity,
+                'daily_realized_pnl': st.daily_realized_pnl,
+                'peak_value': st.peak_value,
+                'max_daily_drawdown': st.max_daily_drawdown,
+                'disabled_until_ts': st.disabled_until_ts,
+                'committed_capital': st.committed_capital,
+                'current_value': st.current_value,
+                'floating_pnl': st.floating_pnl,
+                'floating_loss': st.floating_loss,
+                'current_drawdown': st.current_drawdown,
+            }
+
+
+def _positions_cost_basis(positions: list[dict]) -> float:
+    total = 0.0
+    for p in positions or []:
+        try:
+            bp = float(p.get('buy_price', 0.0) or 0.0)
+            amt = float(p.get('amount', 0.0) or 0.0)
+        except Exception:
+            continue
+        total += (bp * amt)
+    return total
+
+
+def _positions_current_value(positions: list[dict], price: float) -> float:
+    total = 0.0
+    for p in positions or []:
+        try:
+            amt = float(p.get('amount', 0.0) or 0.0)
+        except Exception:
+            continue
+        total += (float(price) * amt)
+    return total
+
+
+def compute_equity_total(symbols: list[str], locks: dict | None = None, price_overrides: dict | None = None) -> float:
+    """Equity total aproximado en USDT: balance libre + valor actual de posiciones abiertas.
+
+    Se usa solo cuando se evalúa abrir nuevas posiciones (no en cada tick) para minimizar llamadas.
+    """
+    usdt_free = get_balance()
+    total_positions_value = 0.0
+
+    price_overrides = price_overrides or {}
+    locks = locks or {}
+
+    for sym in symbols:
+        try:
+            lock = locks.get(sym) if isinstance(locks, dict) else None
+            if lock:
+                with lock:
+                    pos = load_positions(sym)
+            else:
+                pos = load_positions(sym)
+            if not pos:
+                continue
+            px = price_overrides.get(sym)
+            if px is None:
+                px = get_precio_actual(sym)
+            if px is None:
+                continue
+            total_positions_value += _positions_current_value(pos, float(px))
+        except Exception:
+            continue
+
+    return float(usdt_free) + float(total_positions_value)
 
 # Función para guardar logs de operaciones para análisis ML
 
@@ -353,7 +627,8 @@ def send_positions_to_telegram(symbol, data, token, chat_id):
             f"RSI: {rsi:.2f}\n"
             f"StochRSI K: {stochrsi_k:.2f}\n"
             f"StochRSI D: {stochrsi_d:.2f}\n"
-            f"\n*Criterio de compra:* RSI < {rsi_threshold} y StochRSI K > StochRSI D\n"
+            f"\n*Criterio de compra (nuevo):* precio > EMA200, EMA50 > EMA200 y RSI entre {RSI_CONFIRM_MIN:.0f}-{RSI_CONFIRM_MAX:.0f}\n"
+            f"(En régimen BEAR no se abren nuevas posiciones)\n"
         )
         message += "\n\nEl balance actual es: {:.2f} USDT".format(get_balance())
         message += "\n\n*Esperando nuevas oportunidades de compra...*"
@@ -583,40 +858,121 @@ def monitoring_open_position(symbol, lock):
             stochrsi_d = df_metrics['stochrsi_d'].iloc[-1] if 'stochrsi_d' in df_metrics.columns else None
             timestamp = pd.Timestamp.now()
 
+            # ATR basado en última vela cerrada para evitar lookahead
+            try:
+                atr_now = df_metrics['atr'].iloc[-2]
+                atr_now = float(atr_now) if not pd.isna(atr_now) else None
+            except Exception:
+                atr_now = None
+
+            # Equity estimado para risk manager (USDT libre + valor posiciones del símbolo)
+            try:
+                equity_est = float(get_balance()) + _positions_current_value(positions, float(close_price))
+            except Exception:
+                equity_est = float(get_balance())
+
+            # Alimentar risk manager con métricas intradía
+            try:
+                RISK_MANAGER.observe(symbol, positions=positions, price=float(close_price), equity_total=float(equity_est))
+            except Exception:
+                pass
+
             # 3) Preparar actualizaciones y ventas fuera del lock
             to_update = []
             to_sell = []
 
             for position in positions:
-                take_profit = position['take_profit']
-                stop_loss = position['stop_loss']
-                buy_price = position['buy_price']
-                amount = position['amount']
-
-                # Trailing por posición (solo si fue creada con parámetros por régimen)
-                # Si no existe, mantiene el comportamiento anterior usando variables globales.
+                # Compatibilidad: posiciones antiguas pueden no tener nuevas claves
                 try:
-                    trailing_tp = float(position.get('trailing_tp_pct', trailing_take_profit_pct))
+                    buy_price = float(position.get('buy_price', 0.0) or 0.0)
+                    amount = float(position.get('amount', 0.0) or 0.0)
                 except Exception:
-                    trailing_tp = trailing_take_profit_pct
-                try:
-                    trailing_sl = float(position.get('trailing_sl_pct', trailing_stop_pct))
-                except Exception:
-                    trailing_sl = trailing_stop_pct
+                    continue
 
-                if close_price >= take_profit:
-                    # actualizar trailing objetivos (se aplicará bajo lock)
+                try:
+                    take_profit = float(position.get('take_profit', buy_price * (1 + take_profit_pct / 100)) or 0.0)
+                except Exception:
+                    take_profit = buy_price * (1 + take_profit_pct / 100)
+
+                # TP inicial (para activar trailing) - si no existe, usa take_profit actual
+                try:
+                    tp_initial = float(position.get('tp_initial', take_profit) or take_profit)
+                except Exception:
+                    tp_initial = take_profit
+
+                try:
+                    stop_loss = float(position.get('stop_loss', buy_price * (1 - stop_loss_pct / 100)) or 0.0)
+                except Exception:
+                    stop_loss = buy_price * (1 - stop_loss_pct / 100)
+
+                # Activación de trailing solo tras superar TP inicial
+                trailing_active = bool(position.get('trailing_active', False))
+                if (not trailing_active) and close_price >= tp_initial:
+                    trailing_active = True
                     to_update.append({
-                        'match': {'buy_price': buy_price, 'timestamp': str(position['timestamp'])},
+                        'match': {'buy_price': buy_price, 'timestamp': str(position.get('timestamp'))},
                         'fields': {
-                            'take_profit': close_price * (1 + trailing_tp / 100),
-                            'stop_loss': close_price * (1 - trailing_sl / 100),
+                            'trailing_active': True,
+                            'tp_initial': tp_initial,
+                            'max_price': max(float(position.get('max_price', buy_price) or buy_price), float(close_price)),
                         }
                     })
-                elif close_price <= stop_loss:
+
+                effective_stop_loss = stop_loss
+
+                # Trailing stop por ATR (preferido). Si no hay ATR disponible, cae al trailing % anterior.
+                if trailing_active:
+                    updated_fields = {}
+                    if atr_now is not None and atr_now > 0:
+                        # multiplicador por posición si existe; si no, por régimen guardado o default LATERAL
+                        try:
+                            trailing_mult = float(position.get('trailing_sl_atr_mult', 0) or 0)
+                        except Exception:
+                            trailing_mult = 0.0
+                        if trailing_mult <= 0:
+                            pos_regime = str(position.get('regime') or 'LATERAL').upper()
+                            trailing_mult = float((ATR_MULTIPLIERS.get(pos_regime) or ATR_MULTIPLIERS['LATERAL'])['trailing_sl'])
+
+                        tmp = dict(position)
+                        tmp['trailing_active'] = True
+                        tmp.setdefault('max_price', float(position.get('max_price', buy_price) or buy_price))
+                        changed = update_trailing_stop_atr(tmp, float(close_price), float(atr_now), float(trailing_mult))
+                        if changed:
+                            updated_fields['max_price'] = tmp.get('max_price')
+                            updated_fields['stop_loss'] = tmp.get('stop_loss')
+                            updated_fields['trailing_active'] = True
+                            updated_fields['tp_initial'] = tp_initial
+                    else:
+                        # Fallback: trailing % antiguo (solo si no hay ATR)
+                        try:
+                            trailing_sl_pct_pos = float(position.get('trailing_sl_pct', trailing_stop_pct))
+                        except Exception:
+                            trailing_sl_pct_pos = trailing_stop_pct
+                        # stop nunca baja
+                        candidate = float(close_price) * (1 - trailing_sl_pct_pos / 100)
+                        if candidate > stop_loss:
+                            updated_fields['stop_loss'] = candidate
+                            updated_fields['max_price'] = max(float(position.get('max_price', buy_price) or buy_price), float(close_price))
+                            updated_fields['trailing_active'] = True
+                            updated_fields['tp_initial'] = tp_initial
+
+                    if updated_fields:
+                        if 'stop_loss' in updated_fields:
+                            try:
+                                effective_stop_loss = float(updated_fields['stop_loss'])
+                            except Exception:
+                                effective_stop_loss = stop_loss
+                        to_update.append({
+                            'match': {'buy_price': buy_price, 'timestamp': str(position.get('timestamp'))},
+                            'fields': updated_fields
+                        })
+
+                # Venta por stop
+                # Nota: stop_loss puede ser actualizado bajo lock; aquí usamos el valor actual.
+                if close_price <= effective_stop_loss:
                     to_sell.append({
                         'position': position,
-                        'reason': 'TAKE PROFIT' if stop_loss >= buy_price else 'STOP LOSS'
+                        'reason': 'TAKE PROFIT' if effective_stop_loss >= buy_price else 'STOP LOSS'
                     })
 
             # 4) Aplicar actualizaciones rápidas bajo lock
@@ -723,6 +1079,12 @@ def monitoring_open_position(symbol, lock):
                 emoji = '🎯' if reason == 'TAKE PROFIT' else '🚨'
                 msg = f'{emoji} {reason}: Vendemos {sell_qty:.6f} {symbol} a {close_price:.4f} USDT'
                 send_event_to_telegram(msg, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                # registrar pnl realizado en risk manager
+                realized = (close_price - float(removed.get('buy_price', 0.0) or 0.0)) * float(sell_qty)
+                try:
+                    RISK_MANAGER.record_realized_pnl(symbol, realized, timestamp, equity_total=equity_est)
+                except Exception:
+                    pass
                 log_trade(
                     timestamp, symbol, 'sell', close_price, sell_qty,
                     (close_price - removed['buy_price']) * sell_qty,
@@ -831,6 +1193,14 @@ def listen_telegram_commands(token, chat_id, symbols, locks):
                                     continue
                                 resp = ejecutar_orden_con_confirmacion('sell', symbol, sell_qty)
                                 if resp:
+                                    # registrar pnl realizado en risk manager
+                                    try:
+                                        realized = (float(price) - float(position.get('buy_price', 0.0) or 0.0)) * float(sell_qty)
+                                        equity_est = float(get_balance())
+                                        RISK_MANAGER.record_realized_pnl(symbol, realized, pd.Timestamp.now(), equity_total=equity_est)
+                                    except Exception:
+                                        pass
+
                                     log_trade(
                                         pd.Timestamp.now(), symbol, 'sell', price, sell_qty,
                                         (price - position['buy_price']) * sell_qty, 0, 0, 0, 0, 'SELL ALL',
@@ -887,6 +1257,158 @@ def listen_telegram_commands(token, chat_id, symbols, locks):
                         if details:
                             msg_out += "\nDetalles:\n" + details
                         send_event_to_telegram(msg_out, token, chat_id)
+
+                    elif text == "/risk":
+                        # Reporte de riesgo por símbolo (no altera trading, solo observabilidad)
+                        try:
+                            usdt_free = get_balance()
+                        except Exception:
+                            usdt_free = 0.0
+
+                        positions_by_symbol: dict[str, list[dict]] = {}
+                        prices_by_symbol: dict[str, float] = {}
+
+                        for sym in symbols:
+                            try:
+                                with locks[sym]:
+                                    positions_by_symbol[sym] = load_positions(sym)
+                            except Exception:
+                                positions_by_symbol[sym] = []
+
+                        for sym in symbols:
+                            try:
+                                px = get_precio_actual(sym)
+                                if px is not None:
+                                    prices_by_symbol[sym] = float(px)
+                            except Exception:
+                                pass
+
+                        # Equity total estimado: USDT libre + valor de todas las posiciones abiertas
+                        equity_total = float(usdt_free)
+                        for sym, pos in positions_by_symbol.items():
+                            px = prices_by_symbol.get(sym)
+                            if px is None or not pos:
+                                continue
+                            equity_total += _positions_current_value(pos, float(px))
+
+                        lines = []
+                        lines.append(f"🛡️ *RISK*\nEquity estimado: {equity_total:.2f} USDT\nUSDT libre: {float(usdt_free):.2f} USDT\n")
+
+                        now_ts = time.time()
+                        for sym in symbols:
+                            pos = positions_by_symbol.get(sym, [])
+                            px = prices_by_symbol.get(sym)
+
+                            committed = _positions_cost_basis(pos)
+                            current_value = _positions_current_value(pos, float(px)) if (px is not None) else 0.0
+                            floating_pnl = current_value - committed
+
+                            # refrescar métricas internas del RiskManager con datos actuales
+                            try:
+                                if px is not None:
+                                    RISK_MANAGER.observe(sym, positions=pos, price=float(px), equity_total=float(equity_total), now_ts=now_ts)
+                            except Exception:
+                                pass
+
+                            snap = RISK_MANAGER.snapshot(sym, now_ts=now_ts)
+                            disabled_until = float(snap.get('disabled_until_ts') or 0.0)
+                            paused_s = max(0, int(disabled_until - now_ts)) if disabled_until else 0
+
+                            dd_cur = float(snap.get('current_drawdown') or 0.0) * 100
+                            dd_max = float(snap.get('max_daily_drawdown') or 0.0) * 100
+                            floating_loss = float(snap.get('floating_loss') or max(0.0, -floating_pnl))
+                            daily_realized = float(snap.get('daily_realized_pnl') or 0.0)
+
+                            cap_frac = (committed / equity_total) * 100 if equity_total > 0 else 0.0
+
+                            header = f"*{sym}*"
+                            if paused_s > 0:
+                                header += f" (PAUSADO {paused_s//3600}h{(paused_s%3600)//60:02d}m)"
+
+                            lines.append(
+                                f"{header}\n"
+                                f"Precio: {px:.4f}\n" if px is not None else f"{header}\nPrecio: N/A\n"
+                            )
+                            lines.append(
+                                f"Posiciones: {len(pos)}\n"
+                                f"Capital comprometido: {committed:.2f} USDT ({cap_frac:.2f}% equity)\n"
+                                f"Valor actual: {current_value:.2f} USDT\n"
+                                f"PnL flotante: {floating_pnl:+.2f} USDT | Pérdida flotante: {floating_loss:.2f} USDT\n"
+                                f"Drawdown actual: {dd_cur:.2f}% | Máx diario: {dd_max:.2f}%\n"
+                                f"PnL realizado hoy: {daily_realized:+.2f} USDT\n"
+                            )
+
+                        lines.append(
+                            "\nReglas:\n"
+                            f"- Bloqueo por DD símbolo: > {MAX_SYMBOL_DRAWDOWN_FRAC*100:.1f}%\n"
+                            f"- Bloqueo por capital comprometido: > {MAX_CAPITAL_COMMITTED_FRAC*100:.1f}% equity\n"
+                            f"- Pausa 24h si pérdida diaria realizada: > {DAILY_LOSS_LIMIT_FRAC*100:.1f}%\n"
+                        )
+
+                        send_event_to_telegram("\n".join(lines), token, chat_id)
+
+                    elif text == "/params":
+                        # Configuración activa (estrategia + riesgo). No altera ejecución.
+                        try:
+                            testnet_env = (os.getenv('BINANCE_TESTNET', 'true') or 'true').strip().lower()
+                            use_testnet = testnet_env in ('1', 'true', 'yes', 'y', 'on')
+                        except Exception:
+                            use_testnet = True
+
+                        lines = []
+                        lines.append("⚙️ *PARAMS*")
+                        lines.append(f"Testnet: {use_testnet}")
+                        lines.append(f"Símbolos: {', '.join(symbols)}")
+                        lines.append(f"TIMEFRAME: `{timeframe}`")
+                        lines.append(f"POLL_INTERVAL_SECONDS: {poll_interval}")
+                        lines.append("")
+
+                        lines.append("*Entradas (calidad > cantidad)*")
+                        lines.append("- BEAR: *NO abre nuevas posiciones* (hard filter)")
+                        lines.append("- Condición: `price > EMA200` y `EMA50 > EMA200` y RSI en rango")
+                        lines.append(f"- RSI_CONFIRM_MIN/MAX: {RSI_CONFIRM_MIN:.0f} - {RSI_CONFIRM_MAX:.0f}")
+                        lines.append("")
+
+                        lines.append("*ATR / niveles dinámicos*")
+                        lines.append(f"- ATR_WINDOW: {ATR_WINDOW}")
+                        bull = ATR_MULTIPLIERS.get('BULL')
+                        lat = ATR_MULTIPLIERS.get('LATERAL')
+                        lines.append(f"- BULL: TP={bull['tp']}x ATR | SL={bull['sl']}x ATR | trailingSL={bull['trailing_sl']}x ATR")
+                        lines.append(f"- LATERAL: TP={lat['tp']}x ATR | SL={lat['sl']}x ATR | trailingSL={lat['trailing_sl']}x ATR")
+                        lines.append("")
+
+                        lines.append("*Tamaño / cooldown por régimen*")
+                        lines.append(f"- BULL: POSITION_SIZE={float(BULL.get('POSITION_SIZE', 0.0) or 0.0)} | BUY_COOLDOWN={int(BULL.get('BUY_COOLDOWN', 0) or 0)}s")
+                        lines.append(f"- LATERAL: POSITION_SIZE={float(LATERAL.get('POSITION_SIZE', 0.0) or 0.0)} | BUY_COOLDOWN={int(LATERAL.get('BUY_COOLDOWN', 0) or 0)}s")
+                        lines.append(f"- BEAR: POSITION_SIZE={float(BEAR.get('POSITION_SIZE', 0.0) or 0.0)} | BUY_COOLDOWN={int(BEAR.get('BUY_COOLDOWN', 0) or 0)}s (sin compras)")
+                        lines.append("")
+
+                        lines.append("*DCA* (por defecto desactivado)")
+                        lines.append(f"- ENABLE_DCA: {ENABLE_DCA} (si se activa, nunca corre en BEAR)")
+                        lines.append("")
+
+                        lines.append("*Risk manager por símbolo*")
+                        lines.append(f"- MAX_SYMBOL_DRAWDOWN_FRAC: {MAX_SYMBOL_DRAWDOWN_FRAC*100:.1f}%")
+                        lines.append(f"- MAX_CAPITAL_COMMITTED_FRAC: {MAX_CAPITAL_COMMITTED_FRAC*100:.1f}% del equity")
+                        lines.append(f"- DAILY_LOSS_LIMIT_FRAC: {DAILY_LOSS_LIMIT_FRAC*100:.1f}% (pausa {SYMBOL_COOLDOWN_AFTER_DAILY_LOSS_SECONDS//3600}h)")
+                        lines.append("")
+
+                        lines.append("*Operativa* (seguridad)")
+                        lines.append(f"- CANCEL_OPEN_ORDERS_ON_STOP: {cancel_open_orders_on_stop}")
+
+                        send_event_to_telegram("\n".join(lines), token, chat_id)
+
+                    elif text == "/help":
+                        lines = []
+                        lines.append("ℹ️ *HELP* — comandos disponibles")
+                        lines.append("")
+                        lines.append("- `/posiciones`: muestra posiciones por símbolo y métricas rápidas")
+                        lines.append("- `/balance` o `/saldo`: USDT libre + valor estimado de posiciones")
+                        lines.append("- `/risk`: reporte de riesgo (committed, PnL flotante, DD, pausas)")
+                        lines.append("- `/params`: muestra configuración activa (entradas, ATR, risk limits)")
+                        lines.append("- `/sellall`: vende todas las posiciones abiertas (según filtros/qty)")
+                        lines.append("- `/stop`: detiene el bot de forma ordenada")
+                        send_event_to_telegram("\n".join(lines), token, chat_id)
 
             time.sleep(1)
 
@@ -1074,31 +1596,16 @@ def detect_market_regime(df):
 # Nota: Se aplican SOLO a operaciones nuevas. Las posiciones ya abiertas mantienen sus
 # niveles (take_profit/stop_loss) y, si no tienen trailing por posición, usan el trailing global.
 BULL = {
-    "RSI_THRESHOLD": 45,
-    "TAKE_PROFIT_PCT": 5,
-    "STOP_LOSS_PCT": 2,
-    "TRAILING_TP_PCT": 1.2,
-    "TRAILING_SL_PCT": 1.0,
     "BUY_COOLDOWN": 7200,      # 2h
-    "POSITION_SIZE": 0.04
+    "POSITION_SIZE": 0.08
 }
 
 BEAR = {
-    "RSI_THRESHOLD": 30,
-    "TAKE_PROFIT_PCT": 2,
-    "STOP_LOSS_PCT": 1.2,
-    "TRAILING_TP_PCT": 0.8,
-    "TRAILING_SL_PCT": 0.6,
     "BUY_COOLDOWN": 21600,     # 6h
-    "POSITION_SIZE": 0.015
+    "POSITION_SIZE": 0.0
 }
 
 LATERAL = {
-    "RSI_THRESHOLD": 40,
-    "TAKE_PROFIT_PCT": 3,
-    "STOP_LOSS_PCT": 1.5,
-    "TRAILING_TP_PCT": 0.9,
-    "TRAILING_SL_PCT": 0.8,
     "BUY_COOLDOWN": 14400,     # 4h
     "POSITION_SIZE": 0.03
 }
@@ -1108,6 +1615,10 @@ REGIME_PARAMS = {
     "BEAR": BEAR,
     "LATERAL": LATERAL,
 }
+
+
+# Risk manager global (no toca red, thread-safe)
+RISK_MANAGER = RiskManager(SYMBOLS)
 
 # Ejecutar la estrategia en tiempo real
 def run_strategy(symbol, lock):
@@ -1143,19 +1654,33 @@ def run_strategy(symbol, lock):
             # Pedimos más histórico para poder calcular EMA200/ADX y detectar régimen.
             data = get_data_binance(symbol, interval=timeframe, limit=260)
             df = cal_metrics_technig(data, 14, 10, 20)
-            close_price = df['close'].iloc[-1]
+            # Usar SOLO la última vela cerrada para señales (evita lookahead)
+            close_price = df['close'].iloc[-2]
             high = df['high'].iloc[-2]
             low = df['low'].iloc[-2]
             open_price = df['open'].iloc[-2]
             rsi = df['rsi'].iloc[-2]
             stochrsi_k = df['stochrsi_k'].iloc[-2]
             stochrsi_d = df['stochrsi_d'].iloc[-2]
+            ema200 = df['ema200'].iloc[-2] if 'ema200' in df.columns else pd.NA
+            ema50 = df['ema50'].iloc[-2] if 'ema50' in df.columns else pd.NA
+            atr = df['atr'].iloc[-2] if 'atr' in df.columns else pd.NA
             volatility = (high - low) / open_price * 100 if open_price else 0
             timestamp = df['timestamp'].iloc[-2]
 
             # Guardas: si indicadores aún no están disponibles, no operar
-            if pd.isna(rsi) or pd.isna(stochrsi_k) or pd.isna(stochrsi_d):
+            if pd.isna(rsi) or pd.isna(stochrsi_k) or pd.isna(stochrsi_d) or pd.isna(ema200) or pd.isna(ema50) or pd.isna(atr):
                 logger.warning(f"[{symbol}] Indicadores no disponibles (NaN). Omitiendo ciclo.")
+                STOP_EVENT.wait(poll_interval)
+                continue
+
+            try:
+                atr = float(atr)
+            except Exception:
+                STOP_EVENT.wait(poll_interval)
+                continue
+            if atr <= 0:
+                logger.warning(f"[{symbol}] ATR inválido ({atr}). Omitiendo ciclo.")
                 STOP_EVENT.wait(poll_interval)
                 continue
 
@@ -1164,13 +1689,20 @@ def run_strategy(symbol, lock):
             # Detectar régimen usando última vela cerrada (evita lookahead)
             regime = detect_market_regime(df.iloc[:-1])
             params = REGIME_PARAMS.get(regime, LATERAL)
-            rsi_threshold_active = float(params["RSI_THRESHOLD"])
-            take_profit_pct_active = float(params["TAKE_PROFIT_PCT"])
-            stop_loss_pct_active = float(params["STOP_LOSS_PCT"])
-            trailing_tp_pct_active = float(params["TRAILING_TP_PCT"])
-            trailing_sl_pct_active = float(params["TRAILING_SL_PCT"])
             cooldown_seconds_active = int(params["BUY_COOLDOWN"])
             position_size_active = float(params["POSITION_SIZE"])
+
+            # Filtro crítico: en BEAR NO abrir nuevas posiciones (ni DCA)
+            if str(regime).upper() == "BEAR":
+                # Aun así alimentamos risk manager para métricas (sin tocar ejecución)
+                try:
+                    equity_est = float(get_balance()) + _positions_current_value(positions, float(close_price))
+                    RISK_MANAGER.observe(symbol, positions=positions, price=float(close_price), equity_total=float(equity_est))
+                except Exception:
+                    pass
+                logger.info(f"[{symbol}] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.")
+                STOP_EVENT.wait(poll_interval)
+                continue
 
             # Cooldown
             now = time.time()
@@ -1183,10 +1715,46 @@ def run_strategy(symbol, lock):
             # Preferir min_notional real del símbolo si está disponible
             symbol_min_notional = (symbol_filters or {}).get('min_notional', min_notional)
 
+            # Alimentar risk manager (métricas intradía) con equity estimado
+            try:
+                equity_est = float(balance) + _positions_current_value(positions, float(close_price))
+                RISK_MANAGER.observe(symbol, positions=positions, price=float(close_price), equity_total=float(equity_est))
+            except Exception:
+                pass
+
+            # Entradas más restrictivas (calidad > cantidad):
+            # price > EMA200, EMA50 > EMA200, RSI en rango [35,55]
+            entry_ok = (float(close_price) > float(ema200)) and (float(ema50) > float(ema200)) and (RSI_CONFIRM_MIN <= float(rsi) <= RSI_CONFIRM_MAX)
+
             # Intento compra principal
             executed = False
-            if (can_buy and rsi < rsi_threshold_active and stochrsi_k > stochrsi_d
-                and balance > symbol_min_notional and len(positions) < 5):
+
+            if (can_buy and entry_ok and balance > symbol_min_notional and len(positions) < 5):
+
+                # Risk manager global (por símbolo) antes de abrir
+                symbol_committed = _positions_cost_basis(positions)
+
+                # Equity total real (USDT libre + valor de posiciones en todos los símbolos)
+                equity_total = compute_equity_total(SYMBOLS, None, price_overrides={symbol: float(close_price)})
+                # drawdown actual basado en peak intradía
+                try:
+                    sym_value = _positions_current_value(positions, float(close_price))
+                    snap = RISK_MANAGER.snapshot(symbol)
+                    peak = float(snap.get('peak_value') or 0.0)
+                    symbol_drawdown = max(0.0, (peak - sym_value) / peak) if peak > 0 else 0.0
+                except Exception:
+                    symbol_drawdown = 0.0
+
+                allowed, reason = RISK_MANAGER.can_open(
+                    symbol,
+                    equity_total=float(equity_total),
+                    committed_capital=float(symbol_committed),
+                    symbol_drawdown=float(symbol_drawdown),
+                )
+                if not allowed:
+                    logger.warning(f"[{symbol}] RiskManager bloquea nueva entrada: {reason}")
+                    STOP_EVENT.wait(poll_interval)
+                    continue
 
                 capital_usar = balance * position_size_active
                 qty, motivo = preparar_cantidad(symbol, capital_usar, close_price, filters=symbol_filters)
@@ -1194,19 +1762,36 @@ def run_strategy(symbol, lock):
                     logger.info(f"[{symbol}] Skip compra (condición principal): {motivo}")
                 else:
                     debug_symbol_filters(symbol)
+
+                    # TP/SL dinámicos por ATR según régimen
+                    mults = ATR_MULTIPLIERS.get(regime) or ATR_MULTIPLIERS['LATERAL']
+                    tp_mult = float(mults['tp'])
+                    sl_mult = float(mults['sl'])
+                    trailing_sl_mult = float(mults['trailing_sl'])
+                    tp_price, sl_price = calculate_atr_levels(float(close_price), float(atr), tp_mult, sl_mult)
+
                     resp = ejecutar_orden_con_confirmacion('buy', symbol, qty)
                     if resp:
                         new_position = {
                             'buy_price': close_price,
                             'amount': qty,
                             'timestamp': timestamp,
-                            'take_profit': close_price * (1 + take_profit_pct_active / 100),
-                            'stop_loss': close_price * (1 - stop_loss_pct_active / 100),
-                            # Congelar parámetros por posición (solo para posiciones nuevas)
+                            # TP/SL por ATR (compatibles con campos existentes)
+                            'take_profit': tp_price,
+                            'stop_loss': sl_price,
+
+                            # Congelar parámetros por posición
                             'regime': regime,
-                            'rsi_threshold': rsi_threshold_active,
-                            'trailing_tp_pct': trailing_tp_pct_active,
-                            'trailing_sl_pct': trailing_sl_pct_active,
+                            'rsi_threshold': f"{RSI_CONFIRM_MIN}-{RSI_CONFIRM_MAX}",
+
+                            # Persistir ATR y multiplicadores
+                            'atr_entry': float(atr),
+                            'tp_atr_mult': tp_mult,
+                            'sl_atr_mult': sl_mult,
+                            'trailing_sl_atr_mult': trailing_sl_mult,
+                            'tp_initial': tp_price,
+                            'trailing_active': False,
+                            'max_price': float(close_price),
                         }
                         with lock:
                             current = load_positions(symbol)
@@ -1220,62 +1805,25 @@ def run_strategy(symbol, lock):
                             volatility, rsi, stochrsi_k, stochrsi_d, 'BUY',
                             extra={
                                 'regime': regime,
-                                'rsi_threshold_used': rsi_threshold_active,
-                                'take_profit_pct_used': take_profit_pct_active,
-                                'stop_loss_pct_used': stop_loss_pct_active,
-                                'trailing_tp_pct_used': trailing_tp_pct_active,
-                                'trailing_sl_pct_used': trailing_sl_pct_active,
+                                'rsi_threshold_used': f"{RSI_CONFIRM_MIN}-{RSI_CONFIRM_MAX}",
+                                # Reutilizamos columnas existentes para guardar multipliers ATR
+                                'take_profit_pct_used': tp_mult,
+                                'stop_loss_pct_used': sl_mult,
+                                'trailing_tp_pct_used': None,
+                                'trailing_sl_pct_used': trailing_sl_mult,
                                 'buy_cooldown_used': cooldown_seconds_active,
                                 'position_size_used': position_size_active,
                             }
                         )
                         executed = True
 
-            # Compra por caída (DCA/reactiva)
-            if (not executed) and can_buy:
+            # DCA (opcional y desactivado por defecto). Nunca en BEAR (ya filtrado arriba).
+            # Nota: se deja como feature togglable para no introducir martingala implícita.
+            if ENABLE_DCA and (not executed) and can_buy and regime in ("BULL", "LATERAL"):
+                # Mantener el comportamiento antiguo solo si se habilita explícitamente.
                 movimiento = market_change_last_5_intervals(symbol)
                 if movimiento is not None and balance > symbol_min_notional and movimiento <= -5 and len(positions) < 9:
-                    capital_usar = balance * position_size_active
-                    qty, motivo = preparar_cantidad(symbol, capital_usar, close_price, filters=symbol_filters)
-                    if qty is None:
-                        logger.info(f"[{symbol}] Skip compra caída: {motivo}")
-                    else:
-                        debug_symbol_filters(symbol)
-                        resp = ejecutar_orden_con_confirmacion('buy', symbol, qty)
-                        if resp:
-                            new_position = {
-                                'buy_price': close_price,
-                                'amount': qty,
-                                'timestamp': timestamp,
-                                'take_profit': close_price * (1 + take_profit_pct_active / 100),
-                                'stop_loss': close_price * (1 - stop_loss_pct_active / 100),
-                                # Congelar parámetros por posición (solo para posiciones nuevas)
-                                'regime': regime,
-                                'rsi_threshold': rsi_threshold_active,
-                                'trailing_tp_pct': trailing_tp_pct_active,
-                                'trailing_sl_pct': trailing_sl_pct_active,
-                            }
-                            with lock:
-                                current = load_positions(symbol)
-                                current.append(new_position)
-                                save_positions(symbol, current)
-                            balance = get_balance()
-                            last_buy_time = time.time()
-                            send_event_to_telegram(f'📉 DCA {symbol}: {qty:.6f} @ {close_price:.4f} caída {movimiento:.2f}%', TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-                            log_trade(
-                                timestamp, symbol, 'buy', close_price, qty, 0,
-                                volatility, rsi, stochrsi_k, stochrsi_d, 'BUY_DCA',
-                                extra={
-                                    'regime': regime,
-                                    'rsi_threshold_used': rsi_threshold_active,
-                                    'take_profit_pct_used': take_profit_pct_active,
-                                    'stop_loss_pct_used': stop_loss_pct_active,
-                                    'trailing_tp_pct_used': trailing_tp_pct_active,
-                                    'trailing_sl_pct_used': trailing_sl_pct_active,
-                                    'buy_cooldown_used': cooldown_seconds_active,
-                                    'position_size_used': position_size_active,
-                                }
-                            )
+                    logger.warning(f"[{symbol}] DCA habilitado: movimiento={movimiento:.2f}% (controla el riesgo).")
             
             STOP_EVENT.wait(poll_interval)
 

@@ -9,18 +9,24 @@ ENV PYTHONUNBUFFERED=1 \
 	PYTHONDONTWRITEBYTECODE=1
 
 # Soporte de zonas horarias (útil para tzlocal/pytz y logs)
-RUN apk add --no-cache tzdata
+RUN apk add --no-cache tzdata postgresql-libs
 
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir --upgrade pip \
- && python -m pip install --no-cache-dir -r requirements.txt
 
-# Copia solo el script principal y otros archivos necesarios
-COPY bot_trading_v2_2.py .
-# Si tienes otros módulos o archivos necesarios, agrégalos aquí
-# COPY otros_archivos_o_carpetas /app/
+# En Alpine, algunas dependencias (p.ej. psycopg2) pueden requerir toolchain/headers.
+# Instalamos deps de build temporalmente y las removemos al final para no inflar la imagen.
+RUN apk add --no-cache --virtual .build-deps gcc musl-dev postgresql-dev \
+ && python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -r requirements.txt \
+ && apk del .build-deps
 
-RUN mkdir -p /app/files /app/logs
+# Copia el bot + módulos de persistencia PostgreSQL
+COPY bot_trading_v3_1.py .
+COPY db/ ./db/
+COPY repositories/ ./repositories/
+COPY tools/ ./tools/
+
+RUN mkdir -p /app/logs
 
 # Ejecutar como usuario no-root (mejor práctica de seguridad)
 ARG APP_UID=1000
@@ -31,7 +37,7 @@ RUN addgroup -S -g ${APP_GID} app \
 
 USER app
 
-CMD ["python", "bot_trading_v2_2.py"]
+CMD ["python", "bot_trading_v3_1.py"]
 
 # Notas para el usuario:
 # Para desplegar imagen 
