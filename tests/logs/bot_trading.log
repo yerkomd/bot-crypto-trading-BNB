@@ -1,0 +1,4 @@
+2026-02-14 04:28:08,788 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 04:28:08,791 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 04:28:36,666 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 04:28:36,668 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones

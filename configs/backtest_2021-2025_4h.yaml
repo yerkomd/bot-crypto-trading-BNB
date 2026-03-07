@@ -1,0 +1,43 @@
+# Example backtest configuration (YAML)
+# Same schema as configs/backtest_example.json
+
+source: postgres
+symbols: "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,AVAXUSDT,BNBUSDT"
+interval: "4h"
+
+start: "2021-01-01"
+end: "2025-12-31"
+
+initial_cash: 10000.0
+fee_rate: 0.001
+slippage_bps: 10.0
+max_positions_per_symbol: 1
+min_notional: 10.0
+hard_cooldown_s: 0.0
+
+rsi_min: 35
+rsi_max: 55
+
+regime_params:
+  BULL:
+    BUY_COOLDOWN: 7200
+    POSITION_SIZE: 0.04
+  LATERAL:
+    BUY_COOLDOWN: 14400
+    POSITION_SIZE: 0.02
+  BEAR:
+    BUY_COOLDOWN: 21600
+    POSITION_SIZE: 0.0
+
+atr_multipliers:
+  BULL:
+    tp: 1.8
+    sl: 1.2
+    trailing_sl: 1.0
+  LATERAL:
+    tp: 2.0
+    sl: 1.2
+    trailing_sl: 1.0
+  BEAR: null
+
+output_dir: backtest_out_2021_2025_v4_new

@@ -33,3 +33,339 @@
 2026-01-25 12:51:41,891 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
 2026-02-07 20:48:32,945 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
 2026-02-07 20:48:32,952 WARNING [MainThread] bot_trading_v3_1: EMA200 no disponible con el historial actual (se requieren 200 velas). Usando fallback ewm; velas=40. Si estás en BINANCE_TESTNET, es normal que el histórico sea limitado.
+2026-02-12 22:00:29,174 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-12 22:00:29,179 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 03:02:43,052 INFO [MainThread] __main__: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 03:02:44,195 INFO [MainThread] __main__: Clientes Binance inicializados: data=MAINNET trade=TESTNET
+2026-02-14 03:02:44,544 INFO [MainThread] __main__: MAINNET data OK: server time verificado.
+2026-02-14 03:02:44,926 INFO [MainThread] __main__: TESTNET trade OK: acceso a cuenta verificado.
+2026-02-14 03:02:44,933 INFO [MainThread] db.connection: Initializing PostgreSQL pool host=192.168.1.50 port=5432 db=bot_trading user=postgres min=1 max=8
+2026-02-14 03:02:44,963 INFO [MainThread] db.schema: PostgreSQL schema ensured (trading.*)
+2026-02-14 03:02:44,963 INFO [MainThread] __main__: PostgreSQL listo: storage habilitado (single source of truth).
+2026-02-14 03:02:44,963 INFO [MainThread] __main__: Iniciando bot con símbolos: ['BTCUSDT']
+2026-02-14 03:02:44,963 INFO [ThreadPoolExecutor-0_0] __main__: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 03:02:44,964 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Iniciando hilo de estrategia
+2026-02-14 03:02:44,964 INFO [ThreadPoolExecutor-0_2] __main__: Escuchando comandos de Telegram...
+2026-02-14 03:02:44,964 INFO [ThreadPoolExecutor-0_3] __main__: Equity snapshots thread iniciado. intervalo=300s
+2026-02-14 03:02:46,012 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Balance inicial: 10000.00 USDT
+2026-02-14 03:02:47,008 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:02:47,361 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:03:17,377 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:03:17,729 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:03:47,746 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:03:48,100 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:04:18,117 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:04:19,063 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:04:49,079 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:04:50,023 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:05:20,039 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:05:20,979 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:05:50,996 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:05:51,949 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:06:21,965 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:06:22,902 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:06:52,919 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Precio: 68773.4200 | Vol: 0.22% | RSI: 60.67 | Stoch K/D: 0.08/0.23 | Posiciones: 0
+2026-02-14 03:06:53,886 INFO [ThreadPoolExecutor-0_1] __main__: [BTCUSDT] Régimen BEAR: compras deshabilitadas. Solo gestión de posiciones abiertas.
+2026-02-14 03:07:22,071 WARNING [MainThread] __main__: Señal recibida (2). Deteniendo bot...
+2026-02-14 03:07:54,175 INFO [ThreadPoolExecutor-0_2] __main__: Listener Telegram detenido
+2026-02-14 03:07:54,175 INFO [MainThread] __main__: Bot detenido
+2026-02-14 04:33:19,091 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 04:33:19,094 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 04:57:54,014 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 04:57:54,017 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 04:59:17,825 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 04:59:17,828 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 05:02:21,306 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:02:21,307 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 05:02:21,307 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 05:02:21,307 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 05:02:21,307 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0
+2026-02-14 05:02:21,307 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 05:02:21,307 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 05:02:31,500 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:02:31,510 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:02:31,513 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 05:02:31,513 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 05:02:31,515 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 05:02:31,515 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 05:02:31,516 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 05:02:31,523 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:02:31,524 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 05:02:31,524 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 05:02:31,524 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 05:02:31,525 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0
+2026-02-14 05:02:31,525 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 05:02:31,525 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 05:02:31,529 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:02:31,530 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 05:20:09,171 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:20:09,179 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:20:09,182 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 05:20:09,182 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 05:20:09,183 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 05:20:09,183 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 05:20:09,185 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 05:20:09,192 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:20:09,193 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 05:20:09,193 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 05:20:09,193 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 05:20:09,193 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 05:20:09,193 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 05:20:09,193 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 05:20:09,197 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 05:20:09,199 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 09:27:59,823 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:27:59,844 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:27:59,916 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:27:59,918 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 09:27:59,918 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 09:27:59,919 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 09:27:59,919 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 09:27:59,920 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 09:27:59,925 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:27:59,925 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 09:27:59,926 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 09:27:59,926 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 09:27:59,926 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 09:27:59,926 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 09:27:59,926 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 09:27:59,931 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:27:59,932 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 09:29:58,317 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:29:58,335 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:29:58,410 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:29:58,411 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 09:29:58,411 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 09:29:58,413 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 09:29:58,413 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 09:29:58,414 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 09:29:58,419 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:29:58,419 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 09:29:58,419 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 09:29:58,420 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 09:29:58,420 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 09:29:58,420 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 09:29:58,420 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 09:29:58,425 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 09:29:58,427 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:02:49,519 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:03:00,870 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:28,679 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:40,952 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:40,969 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:41,044 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:41,046 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:04:41,046 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 10:04:41,047 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 10:04:41,047 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 10:04:41,049 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 10:04:41,053 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:41,054 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 10:04:41,054 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 10:04:41,054 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 10:04:41,054 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 10:04:41,054 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 10:04:41,055 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 10:04:41,059 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:04:41,061 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:14:16,240 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,422 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,439 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,514 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,515 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:14:21,515 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 10:14:21,517 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 10:14:21,517 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 10:14:21,518 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 10:14:21,522 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,523 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 10:14:21,523 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 10:14:21,523 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 10:14:21,523 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 10:14:21,523 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 10:14:21,524 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 10:14:21,528 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:14:21,529 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:22:45,850 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,628 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,645 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,719 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,720 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 10:22:54,720 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 10:22:54,722 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 10:22:54,722 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 10:22:54,723 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 10:22:54,727 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,728 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 10:22:54,728 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 10:22:54,728 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 10:22:54,728 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 10:22:54,729 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 10:22:54,729 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 10:22:54,733 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 10:22:54,735 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 18:26:00,921 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:26:00,934 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:26:01,018 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:26:01,020 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 18:26:01,020 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 18:26:01,021 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 18:26:01,021 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 18:26:01,023 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 18:26:01,027 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:26:01,028 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 18:26:01,028 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 18:26:01,028 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 18:26:01,028 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 18:26:01,028 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 18:26:01,028 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 18:26:01,033 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:26:01,035 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-14 18:31:40,805 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:31:40,816 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:31:40,889 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:31:40,890 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-14 18:31:40,890 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-14 18:31:40,892 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-14 18:31:40,892 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-14 18:31:40,893 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-14 18:31:40,897 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:31:40,898 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-14 18:31:40,898 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-14 18:31:40,898 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-14 18:31:40,898 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=196.4 TP=206.0 ATR=None
+2026-02-14 18:31:40,899 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-14 18:31:40,899 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-14 18:31:40,903 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-14 18:31:40,904 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-18 10:37:19,869 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 10:37:19,869 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 10:37:19,869 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 10:50:26,050 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 10:50:26,050 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 10:50:26,050 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 10:50:52,806 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 10:50:52,807 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 10:50:52,807 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 10:51:15,005 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 10:51:15,005 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 10:51:15,005 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 10:51:55,614 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 10:51:55,615 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 10:51:55,615 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 11:09:36,308 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 11:09:36,308 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 11:09:36,308 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 11:16:00,207 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 11:16:00,207 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 11:16:00,207 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 11:29:57,793 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 11:29:57,793 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 11:29:57,793 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 16:10:31,804 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 16:10:31,804 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 16:10:31,804 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:13:10,488 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:13:10,488 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:13:10,488 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:15:27,221 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:15:27,221 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:15:27,221 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,326 INFO [MainThread] bot_trading_v2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,326 INFO [MainThread] bot_trading_v2: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,326 INFO [MainThread] bot_trading_v2: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,336 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,336 INFO [MainThread] bot_trading_v2_2: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,336 INFO [MainThread] bot_trading_v2_2: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,357 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,357 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,357 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,449 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,449 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,449 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,464 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,464 INFO [MainThread] bot_trading_v2_2: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,464 INFO [MainThread] bot_trading_v2_2: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,465 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo monitor posiciones
+2026-02-18 17:31:26,465 WARNING [MainThread] bot_trading_v2_2: [TESTUSDT] No se pudieron obtener filtros de símbolo (monitor): 'NoneType' object has no attribute 'get_symbol_info'
+2026-02-18 17:31:26,467 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Iniciando hilo de estrategia
+2026-02-18 17:31:26,467 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Balance inicial: 1000.00 USDT
+2026-02-18 17:31:26,469 INFO [MainThread] bot_trading_v2_2: [TESTUSDT] Precio: 100.0000 | Vol: 2.00% | RSI: 10.00 | Stoch K/D: 2.00/1.00 | Posiciones: 0
+2026-02-18 17:31:26,475 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,475 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,475 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,475 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-18 17:31:26,476 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-18 17:31:26,476 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-18 17:31:26,476 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=198.0 TP=204.0 ATR=None
+2026-02-18 17:31:26,476 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-18 17:31:26,476 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-18 17:31:26,483 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:26,483 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:26,483 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:31:26,485 INFO [MainThread] bot_trading_v3_1: [BTCUSDT] Iniciando hilo monitor posiciones
+2026-02-18 17:31:38,266 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:31:38,266 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:31:38,266 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:33:24,648 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:33:24,648 INFO [MainThread] bot_trading_v2_2: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:33:24,648 INFO [MainThread] bot_trading_v2_2: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:51:30,800 INFO [MainThread] bot_trading_v2_2: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:51:30,800 INFO [MainThread] bot_trading_v2_2: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:51:30,800 INFO [MainThread] bot_trading_v2_2: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 17:54:38,251 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 17:54:38,252 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 17:54:38,252 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 18:07:23,330 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 18:07:23,330 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 18:07:23,330 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-18 18:10:21,707 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-18 18:10:21,707 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-18 18:10:21,707 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-22 10:41:48,976 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-22 10:41:48,977 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-22 10:41:48,977 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-22 10:41:48,978 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=1 >= 1. reason=BINANCE_API_EXCEPTION_-2015
+2026-02-22 10:41:48,978 CRITICAL [MainThread] risk_layer_v2: 🛑 GLOBAL KILL SWITCH: drawdown=20.00% >= 10.00% peak=1000.00 current=800.00
+2026-02-22 10:41:48,978 CRITICAL [MainThread] risk_layer_v2: 🚨 RECONCILIATION CRITICAL BTCUSDT: DB amount=0.5 but exchange balance=0. Deleted DB position(s).
+2026-02-22 10:41:48,978 WARNING [MainThread] risk_layer_v2: ⚠️ RECONCILIATION BTCUSDT: exchange has base asset=0.25, DB empty -> inserted RECOVERED position @ 200.0 SL=198.0 TP=204.0 ATR=None
+2026-02-22 10:41:48,978 WARNING [MainThread] risk_layer_v2: RECONCILIATION WARNING BTCUSDT: DB amount=1.0 exchange=0.5 -> adjusted DB (factor=0.50000000)
+2026-02-22 10:41:48,978 CRITICAL [MainThread] risk_layer_v2: 🛑 CIRCUIT BREAKER: critical_errors=2 >= 2. reason=X
+2026-02-22 10:41:48,979 INFO [MainThread] risk_layer_v3: Equity regime bearish: adjusting position size 200.00000000 -> 100.00000000
+2026-02-22 10:41:48,979 WARNING [MainThread] risk_layer_v3: RISK_V3_BLOCK: equity_regime_bearish (EMA50 < EMA200) in block mode
+2026-02-22 10:41:48,986 WARNING [MainThread] risk_layer_v3: RISK_V3_BLOCK: intraday_var=0.1061 > max_var_frac=0.0500
+2026-02-22 10:41:48,993 WARNING [MainThread] risk_layer_v3: RISK_V3_BLOCK: correlation_exposure=0.3500 > max=0.2500 for cluster=['BTCUSDT', 'ETHUSDT']
+2026-02-22 10:41:48,994 WARNING [MainThread] risk_layer_v3: Slippage breach: slippage=1.0000% > 0.5000% (consecutive=1)
+2026-02-22 10:41:48,994 WARNING [MainThread] risk_layer_v3: Slippage breach: slippage=0.7000% > 0.5000% (consecutive=2)
+2026-02-22 10:41:48,994 WARNING [MainThread] risk_layer_v3: Slippage breach: slippage=0.8000% > 0.5000% (consecutive=3)
+2026-02-22 10:41:48,994 CRITICAL [MainThread] risk_layer_v3: RISK_V3_BLOCK: slippage_breaches=3 >= max_consecutive=3. Activating STOP_EVENT
+2026-02-22 18:45:59,342 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-22 18:45:59,342 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-22 18:45:59,342 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-22 18:45:59,346 ERROR [MainThread] estrategia_v5: estrategia_v5: no se pudo cargar modelo ML '/tmp/missing.joblib': load error
+2026-02-22 18:46:07,283 INFO [MainThread] bot_trading_v3_1: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-22 18:46:07,283 INFO [MainThread] bot_trading_v3_1: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-22 18:46:07,283 INFO [MainThread] bot_trading_v3_1: Asegúrate de crear un archivo .env con las variables.
+2026-02-22 18:47:33,860 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-22 18:47:33,860 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-22 18:47:33,860 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-22 18:47:33,865 ERROR [MainThread] estrategia_v5: estrategia_v5: no se pudo cargar modelo ML '/tmp/missing.joblib': load error
+2026-02-27 20:59:55,801 INFO [MainThread] bot_trading_v4: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-27 20:59:55,801 INFO [MainThread] bot_trading_v4: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-27 20:59:55,801 INFO [MainThread] bot_trading_v4: Asegúrate de crear un archivo .env con las variables.
+2026-02-27 20:59:55,806 ERROR [MainThread] estrategia_v5: estrategia_v5: no se pudo cargar modelo ML '/tmp/missing.joblib': load error
+2026-02-27 20:59:55,841 INFO [MainThread] bot_trading_v5_env_test: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-27 20:59:55,841 INFO [MainThread] bot_trading_v5_env_test: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-27 20:59:55,841 INFO [MainThread] bot_trading_v5_env_test: Asegúrate de crear un archivo .env con las variables.
+2026-02-27 20:59:55,847 INFO [MainThread] bot_trading_v5_run_test: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-02-27 20:59:55,847 INFO [MainThread] bot_trading_v5_run_test: Advertencia: TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID no configurados. Las notificaciones de Telegram no funcionarán.
+2026-02-27 20:59:55,847 INFO [MainThread] bot_trading_v5_run_test: Asegúrate de crear un archivo .env con las variables.
+2026-02-27 20:59:55,848 INFO [MainThread] bot_trading_v5_run_test: [BTCUSDT] Iniciando hilo de estrategia
+2026-02-27 20:59:55,848 INFO [MainThread] bot_trading_v5_run_test: [BTCUSDT] Balance inicial: 1000.00 USDT
+2026-02-27 20:59:55,850 INFO [MainThread] bot_trading_v5_run_test: [BTCUSDT] Precio: 100.0000 | Vol: 2.00% | EMA200: 90.0000 | EMA50: 95.0000 | ADX: 30.00 | Regime: BULL | Posiciones: 0
+2026-03-01 21:48:27,690 INFO [MainThread] bot_trading_v5: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-03-01 21:53:50,199 INFO [MainThread] bot_trading_v5: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-03-01 21:54:59,808 INFO [MainThread] bot_trading_v5: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-03-02 20:24:37,748 INFO [MainThread] bot_trading_v5: Bot Trading v2 iniciado. LOG_LEVEL=INFO
+2026-03-02 20:24:37,755 INFO [MainThread] db.connection: Initializing PostgreSQL pool host=192.168.1.50 port=5432 db=bot_trading user=postgres min=1 max=8
+2026-03-02 20:27:44,254 INFO [MainThread] bot_trading_v5: Bot Trading v2 iniciado. LOG_LEVEL=INFO

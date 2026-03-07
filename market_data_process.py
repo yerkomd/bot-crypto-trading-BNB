@@ -21,12 +21,16 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
+from datetime import datetime
+
 from binance.client import Client
+from dotenv import load_dotenv
 
 from db.connection import init_db_from_env
-from db.schema import ensure_schema
+from db.schema import ensure_market_schema
 from services.market_klines_service import sync_klines_to_postgres
 
 
@@ -57,6 +61,19 @@ def _env_float(name: str, default: float) -> float:
         return float(default)
 
 
+def _env_datetime(name: str) -> datetime | None:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    # Support common ISO8601 forms, including trailing 'Z'
+    s = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        logger.warning("Invalid %s=%s (expected ISO8601). Ignoring.", name, raw)
+        return None
+
+
 _STOP = False
 
 
@@ -79,6 +96,17 @@ def main() -> int:
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
+    # Load env vars from `.env` colocated with this script (robust when launched from other cwd).
+    try:
+        env_path = Path(__file__).resolve().parent / ".env"
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path)
+        else:
+            load_dotenv()
+    except Exception:
+        # Non-fatal: env can still be provided via the shell/container.
+        pass
+
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
@@ -89,12 +117,18 @@ def main() -> int:
     max_pages = _env_int("KLINES_MAX_PAGES", 20)
     overlap_candles = _env_int("KLINES_OVERLAP_CANDLES", 2)
 
+    # Optional history controls
+    history_lookback = (os.getenv("KLINES_HISTORY_LOOKBACK") or "").strip() or None
+    start_time = _env_datetime("KLINES_START_TIME")
+    end_time = _env_datetime("KLINES_END_TIME")
+
     sync_every_s = _env_float("MARKET_DATA_SYNC_EVERY_SECONDS", 30.0)
 
     logger.info("Market Data Process starting symbols=%s intervals=%s", symbols, intervals)
 
     db = init_db_from_env()
-    ensure_schema(db)
+    # Market Data Process must NOT touch trading tables (open_positions/trade_history/etc.)
+    ensure_market_schema(db)
 
     client_data = build_client_data()
 
@@ -112,6 +146,9 @@ def main() -> int:
                         symbol=sym,
                         interval=itv,
                         backfill_limit=backfill_limit,
+                        history_lookback=history_lookback,
+                        start_time=start_time,
+                        end_time=end_time,
                         max_pages=max_pages,
                         overlap_candles=overlap_candles,
                     )

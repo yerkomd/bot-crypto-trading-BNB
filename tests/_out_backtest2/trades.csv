@@ -1,0 +1,2 @@
+symbol,entry_time,exit_time,qty,entry_price,exit_price,reason,pnl,pnl_pct,fees_paid,duration_bars
+BTCUSDT,2024-01-01 01:00:00+00:00,2024-01-01 01:00:00+00:00,5.0,100.0,150.0,FORCED_EXIT_EOD,248.75,0.5,1.25,1

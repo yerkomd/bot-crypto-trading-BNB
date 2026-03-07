@@ -8,6 +8,18 @@ Desde `bot_trading_v3_1.py` el bot **NO usa CSV** para:
 
 PostgreSQL es la **única fuente de verdad**. El esquema/tablas se crean de forma idempotente al arrancar.
 
+## Backtesting (institucional)
+
+Manual y runner para backtesting vela-por-vela (sin lookahead) reutilizando la estrategia real v3.1:
+
+- backtesting/README.md
+
+Ejecución:
+
+```bash
+python -m backtesting.run_backtest --help
+```
+
 Archivos relevantes:
 - [db/schema.sql](db/schema.sql): SQL idempotente (schema `trading` + tablas + índices)
 - [db/connection.py](db/connection.py): pool, transacciones explícitas y reconexión
@@ -15,6 +27,20 @@ Archivos relevantes:
 - [repositories/open_positions_repo.py](repositories/open_positions_repo.py)
 - [repositories/trade_history_repo.py](repositories/trade_history_repo.py)
 - [repositories/equity_repo.py](repositories/equity_repo.py)
+
+## Pruebas unitarias (rápidas)
+
+Para validar solo capas de riesgo v2/v3:
+
+```bash
+/home/melgary/Proyectos/.venv/bin/python -m unittest tests.test_risk_layer_v2 tests.test_risk_layer_v3 -v
+```
+
+Si tienes `pytest` instalado:
+
+```bash
+/home/melgary/Proyectos/.venv/bin/python -m pytest tests/test_risk_layer_v2.py tests/test_risk_layer_v3.py -q
+```
 
 ### Variables de entorno (OBLIGATORIAS)
 

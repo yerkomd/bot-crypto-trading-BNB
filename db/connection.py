@@ -47,8 +47,15 @@ class PostgresConfig:
     connect_timeout_s: int = 5
 
 
-def load_postgres_config_from_env() -> PostgresConfig:
-    if not _env_bool("USE_DATABASE", False):
+def load_postgres_config_from_env(*, require_use_database: bool = True) -> PostgresConfig:
+    """Load Postgres connection config from env vars.
+
+    The trading bot historically gated DB usage behind USE_DATABASE=true.
+    Backtesting uses Postgres as a read-only kline source and should not be
+    blocked by that flag, so callers may set require_use_database=False.
+    """
+
+    if require_use_database and not _env_bool("USE_DATABASE", False):
         raise RuntimeError("USE_DATABASE must be true. CSV/file persistence is disabled.")
 
     return PostgresConfig(
@@ -218,10 +225,10 @@ class PostgresDatabase:
 _DB_SINGLETON: Optional[PostgresDatabase] = None
 
 
-def init_db_from_env() -> PostgresDatabase:
+def init_db_from_env(*, require_use_database: bool = True) -> PostgresDatabase:
     global _DB_SINGLETON
     if _DB_SINGLETON is None:
-        cfg = load_postgres_config_from_env()
+        cfg = load_postgres_config_from_env(require_use_database=require_use_database)
         _DB_SINGLETON = PostgresDatabase(cfg)
         _DB_SINGLETON.initialize()
     return _DB_SINGLETON

@@ -1,0 +1,3 @@
+timestamp,cash,positions_value,equity,open_positions,drawdown
+2024-01-01 00:00:00+00:00,1000.0,0.0,1000.0,0,0.0
+2024-01-01 01:00:00+00:00,1248.75,0.0,1248.75,0,0.0

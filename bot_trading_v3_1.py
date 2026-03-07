@@ -22,6 +22,17 @@ from repositories.trade_history_repo import TradeHistoryRepository
 from repositories.equity_repo import EquitySnapshotsRepository
 from services.market_klines_service import read_klines_df
 
+# Risk Layer v2 (institucional) - modular, no cambia el flujo de estrategia
+from risk_layer_v2 import (
+    GlobalRiskController,
+    RiskEventLogger,
+    SystemHealthMonitor,
+    reconcile_positions_with_exchange,
+    reconcile_worker,
+    risk_metrics_worker,
+    start_health_server,
+)
+
 # Cargar variables de entorno desde un archivo .env (no toca red; seguro para imports/tests)
 load_dotenv()
 
@@ -75,6 +86,10 @@ DB = None
 OPEN_POS_REPO: OpenPositionsRepository | None = None
 TRADE_REPO: TradeHistoryRepository | None = None
 EQUITY_REPO: EquitySnapshotsRepository | None = None
+
+RISK_EVENT_LOGGER: RiskEventLogger | None = None
+GLOBAL_RISK_CONTROLLER: GlobalRiskController | None = None
+SYSTEM_HEALTH_MONITOR: SystemHealthMonitor | None = None
 
 POSITIONS_CACHE_BY_SYMBOL: dict[str, list[dict]] = {}
 
@@ -177,21 +192,54 @@ def _binance_call(fn, *args, tries: int = 3, backoff_base: float = 1.7, **kwargs
     _require_clients()
     for attempt in range(1, tries + 1):
         try:
-            return fn(*args, **kwargs)
+            out = fn(*args, **kwargs)
+            try:
+                if SYSTEM_HEALTH_MONITOR is not None:
+                    SYSTEM_HEALTH_MONITOR.record_success()
+            except Exception:
+                pass
+            return out
         except BinanceAPIException as be:
             code = getattr(be, 'code', None)
             msg = getattr(be, 'message', str(be))
             # no reintentar errores típicamente definitivos
             # -2015: Invalid API-key, IP, or permissions for action
-            if str(code) in ('-2015', '-2010', '2010') or 'LOT_SIZE' in str(msg) or 'MIN_NOTIONAL' in str(msg):
+            if str(code) in ('-2015',):
+                try:
+                    if SYSTEM_HEALTH_MONITOR is not None:
+                        SYSTEM_HEALTH_MONITOR.record_critical(
+                            reason="BINANCE_API_EXCEPTION_-2015",
+                            meta={"fn": getattr(fn, '__name__', str(fn)), "code": str(code), "msg": str(msg)},
+                        )
+                except Exception:
+                    pass
+                raise
+
+            if str(code) in ('-2010', '2010') or 'LOT_SIZE' in str(msg) or 'MIN_NOTIONAL' in str(msg):
                 raise
             if attempt >= tries:
+                try:
+                    if SYSTEM_HEALTH_MONITOR is not None and getattr(fn, '__name__', '') == 'get_account':
+                        SYSTEM_HEALTH_MONITOR.record_critical(
+                            reason="GET_ACCOUNT_FAILED",
+                            meta={"fn": "get_account", "code": str(code), "msg": str(msg)},
+                        )
+                except Exception:
+                    pass
                 raise
             sleep_s = (backoff_base ** (attempt - 1))
             logger.warning(f"Binance: error intento={attempt}/{tries} code={code} msg={msg}. Reintentando en {sleep_s:.1f}s")
             time.sleep(sleep_s)
         except Exception as e:
             if attempt >= tries:
+                try:
+                    if SYSTEM_HEALTH_MONITOR is not None and getattr(fn, '__name__', '') == 'get_account':
+                        SYSTEM_HEALTH_MONITOR.record_critical(
+                            reason="GET_ACCOUNT_FAILED",
+                            meta={"fn": "get_account", "error": str(e)},
+                        )
+                except Exception:
+                    pass
                 raise
             sleep_s = (backoff_base ** (attempt - 1))
             logger.warning(f"Binance: error intento={attempt}/{tries} {e}. Reintentando en {sleep_s:.1f}s")
@@ -657,6 +705,13 @@ def equity_snapshot_worker(symbols: list[str], locks: dict[str, threading.Lock] 
             )
             if not ok:
                 logger.warning("Equity snapshot no persistido (DB error).")
+            else:
+                # Global equity kill switch (Risk Layer v2)
+                try:
+                    if GLOBAL_RISK_CONTROLLER is not None:
+                        GLOBAL_RISK_CONTROLLER.on_equity_snapshot(equity_total=float(equity_total), when=now_ts)
+                except Exception as e:
+                    logger.warning("GlobalRiskController error: %s", e)
 
         except Exception as e:
             logger.error(f"Equity snapshot worker error: {e}")
@@ -888,6 +943,15 @@ def ejecutar_orden_con_confirmacion(
 
                 if status in ('CANCELED', 'REJECTED', 'EXPIRED'):
                     logger.warning(f"[{symbol}] ❌ Orden {order_id} estado terminal={status}")
+                    # Circuit breaker: rechazos repetidos pueden indicar un problema sistémico
+                    try:
+                        if SYSTEM_HEALTH_MONITOR is not None and status in ('REJECTED', 'EXPIRED'):
+                            SYSTEM_HEALTH_MONITOR.record_critical(
+                                reason="ORDER_REJECTED",
+                                meta={"symbol": symbol, "order_id": order_id, "status": status},
+                            )
+                    except Exception:
+                        pass
                     break  # salir de verificación e ir a reintento
 
                 # NEW u otros: seguir
@@ -975,7 +1039,10 @@ def monitoring_open_position(symbol, lock):
             # 2) Fuera del lock: llamadas de red y cálculo
             data = get_data_binance(symbol, interval=timeframe)
             df_metrics = cal_metrics_technig(data.copy(), 14, 10, 20)
+            # Precio para ejecución/SL/TP: usar Binance live para evitar retrasos por DB.
+            live_price = get_precio_actual(symbol)
             close_price = df_metrics['close'].iloc[-1]
+            current_price = float(live_price) if live_price is not None else float(close_price)
             high = df_metrics['high'].iloc[-1]
             low = df_metrics['low'].iloc[-1]
             open_price = df_metrics['open'].iloc[-1]
@@ -994,13 +1061,13 @@ def monitoring_open_position(symbol, lock):
 
             # Equity estimado para risk manager (USDT libre + valor posiciones del símbolo)
             try:
-                equity_est = float(get_balance()) + _positions_current_value(positions, float(close_price))
+                equity_est = float(get_balance()) + _positions_current_value(positions, float(current_price))
             except Exception:
                 equity_est = float(get_balance())
 
             # Alimentar risk manager con métricas intradía
             try:
-                RISK_MANAGER.observe(symbol, positions=positions, price=float(close_price), equity_total=float(equity_est))
+                RISK_MANAGER.observe(symbol, positions=positions, price=float(current_price), equity_total=float(equity_est))
             except Exception:
                 pass
 
@@ -1034,14 +1101,14 @@ def monitoring_open_position(symbol, lock):
 
                 # Activación de trailing solo tras superar TP inicial
                 trailing_active = bool(position.get('trailing_active', False))
-                if (not trailing_active) and close_price >= tp_initial:
+                if (not trailing_active) and current_price >= tp_initial:
                     trailing_active = True
                     to_update.append({
                         'match': {'id': position.get('id'), 'buy_price': buy_price, 'timestamp': str(position.get('timestamp'))},
                         'fields': {
                             'trailing_active': True,
                             'tp_initial': tp_initial,
-                            'max_price': max(float(position.get('max_price', buy_price) or buy_price), float(close_price)),
+                            'max_price': max(float(position.get('max_price', buy_price) or buy_price), float(current_price)),
                         }
                     })
 
@@ -1063,7 +1130,7 @@ def monitoring_open_position(symbol, lock):
                         tmp = dict(position)
                         tmp['trailing_active'] = True
                         tmp.setdefault('max_price', float(position.get('max_price', buy_price) or buy_price))
-                        changed = update_trailing_stop_atr(tmp, float(close_price), float(atr_now), float(trailing_mult))
+                        changed = update_trailing_stop_atr(tmp, float(current_price), float(atr_now), float(trailing_mult))
                         if changed:
                             updated_fields['max_price'] = tmp.get('max_price')
                             updated_fields['stop_loss'] = tmp.get('stop_loss')
@@ -1076,10 +1143,10 @@ def monitoring_open_position(symbol, lock):
                         except Exception:
                             trailing_sl_pct_pos = trailing_stop_pct
                         # stop nunca baja
-                        candidate = float(close_price) * (1 - trailing_sl_pct_pos / 100)
+                        candidate = float(current_price) * (1 - trailing_sl_pct_pos / 100)
                         if candidate > stop_loss:
                             updated_fields['stop_loss'] = candidate
-                            updated_fields['max_price'] = max(float(position.get('max_price', buy_price) or buy_price), float(close_price))
+                            updated_fields['max_price'] = max(float(position.get('max_price', buy_price) or buy_price), float(current_price))
                             updated_fields['trailing_active'] = True
                             updated_fields['tp_initial'] = tp_initial
 
@@ -1096,7 +1163,7 @@ def monitoring_open_position(symbol, lock):
 
                 # Venta por stop
                 # Nota: stop_loss puede ser actualizado bajo lock; aquí usamos el valor actual.
-                if close_price <= effective_stop_loss:
+                if current_price <= effective_stop_loss:
                     to_sell.append({
                         'position': position,
                         'reason': 'TAKE PROFIT' if effective_stop_loss >= buy_price else 'STOP LOSS'
@@ -1161,7 +1228,7 @@ def monitoring_open_position(symbol, lock):
 
                 requested_qty = float(removed.get('amount', 0.0) or 0.0)
                 sell_qty_raw = min(requested_qty, free_qty)
-                sell_qty, motivo = sanitize_quantity(symbol, sell_qty_raw, close_price, for_sell=True, filters=symbol_filters)
+                sell_qty, motivo = sanitize_quantity(symbol, sell_qty_raw, current_price, for_sell=True, filters=symbol_filters)
 
                 # Si el balance está bloqueado en órdenes abiertas, un STOP LOSS puede fallar.
                 if sell_qty is None and cancel_open_orders_on_stop and locked_qty > 0:
@@ -1171,7 +1238,7 @@ def monitoring_open_position(symbol, lock):
                         free_qty = float(bal.get('free', 0.0) or 0.0)
                         locked_qty = float(bal.get('locked', 0.0) or 0.0)
                         sell_qty_raw = min(requested_qty, free_qty)
-                        sell_qty, motivo = sanitize_quantity(symbol, sell_qty_raw, close_price, for_sell=True, filters=symbol_filters)
+                        sell_qty, motivo = sanitize_quantity(symbol, sell_qty_raw, current_price, for_sell=True, filters=symbol_filters)
 
                 if sell_qty is None:
                     min_qty_dbg = (symbol_filters or {}).get('min_qty')
@@ -1213,17 +1280,17 @@ def monitoring_open_position(symbol, lock):
                     continue
 
                 emoji = '🎯' if reason == 'TAKE PROFIT' else '🚨'
-                msg = f'{emoji} {reason}: Vendemos {sell_qty:.6f} {symbol} a {close_price:.4f} USDT'
+                msg = f'{emoji} {reason}: Vendemos {sell_qty:.6f} {symbol} a {current_price:.4f} USDT'
                 send_event_to_telegram(msg, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
                 # registrar pnl realizado en risk manager
-                realized = (close_price - float(removed.get('buy_price', 0.0) or 0.0)) * float(sell_qty)
+                realized = (current_price - float(removed.get('buy_price', 0.0) or 0.0)) * float(sell_qty)
                 try:
                     RISK_MANAGER.record_realized_pnl(symbol, realized, timestamp, equity_total=equity_est)
                 except Exception:
                     pass
                 log_trade(
-                    timestamp, symbol, 'sell', close_price, sell_qty,
-                    (close_price - removed['buy_price']) * sell_qty,
+                    timestamp, symbol, 'sell', current_price, sell_qty,
+                    (current_price - removed['buy_price']) * sell_qty,
                     volatility, rsi, stochrsi_k, stochrsi_d, reason,
                     extra={
                         'buy_price': removed.get('buy_price'),
@@ -1973,6 +2040,7 @@ def run_strategy(symbol, lock):
 def main():
     global client_data, client_trade
     global DB, OPEN_POS_REPO, TRADE_REPO, EQUITY_REPO
+    global RISK_EVENT_LOGGER, GLOBAL_RISK_CONTROLLER, SYSTEM_HEALTH_MONITOR
 
     # Validaciones y configuración
     _validate_required_env()
@@ -2048,15 +2116,107 @@ def main():
         logger.warning("Detenido antes de iniciar trading (señal recibida durante init DB).")
         return
 
+    # --- Risk Layer v2: inicialización (después de DB ready, antes de arrancar hilos) ---
+    RISK_EVENT_LOGGER = RiskEventLogger(DB)
+
+    def _send_telegram_msg(msg: str) -> None:
+        try:
+            send_event_to_telegram(msg, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        except Exception:
+            pass
+
+    SYSTEM_HEALTH_MONITOR = SystemHealthMonitor(
+        stop_event=STOP_EVENT,
+        send_telegram=_send_telegram_msg,
+        event_logger=RISK_EVENT_LOGGER,
+    )
+    GLOBAL_RISK_CONTROLLER = GlobalRiskController(
+        db=DB,
+        stop_event=STOP_EVENT,
+        send_telegram=_send_telegram_msg,
+        event_logger=RISK_EVENT_LOGGER,
+    )
+
     locks = {symbol: threading.Lock() for symbol in SYMBOLS}
     logger.info(f"Iniciando bot con símbolos: {SYMBOLS}")
 
-    with ThreadPoolExecutor(max_workers=(len(SYMBOLS) * 2) + 2) as executor:
+    # +3: reconcile worker, risk metrics worker, health server
+    with ThreadPoolExecutor(max_workers=(len(SYMBOLS) * 2) + 5) as executor:
         for symbol in SYMBOLS:
             executor.submit(monitoring_open_position, symbol, locks[symbol])
             executor.submit(run_strategy, symbol, locks[symbol])
         executor.submit(listen_telegram_commands, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, SYMBOLS, locks)
         executor.submit(equity_snapshot_worker, SYMBOLS, locks)
+
+        # --- Reconciliación automática DB <-> Binance ---
+        def _reconcile_one(sym: str) -> None:
+            try:
+                _require_repos()
+                reconcile_positions_with_exchange(
+                    symbol=sym,
+                    db=DB,
+                    open_pos_repo=OPEN_POS_REPO,  # type: ignore[arg-type]
+                    client_trade=client_trade,
+                    get_live_price=get_precio_actual,
+                    event_logger=RISK_EVENT_LOGGER,  # type: ignore[arg-type]
+                )
+            except Exception:
+                logger.exception("reconcile_one failed sym=%s", sym)
+
+        # Run once at startup (non-fatal)
+        for sym in SYMBOLS:
+            _reconcile_one(sym)
+
+        executor.submit(
+            reconcile_worker,
+            symbols=SYMBOLS,
+            interval_s=600.0,
+            stop_event=STOP_EVENT,
+            reconcile_fn=_reconcile_one,
+        )
+
+        # --- Métricas institucionales de riesgo (cada 5 min) ---
+        def _get_open_positions_all() -> list[dict]:
+            try:
+                _require_repos()
+                rows = OPEN_POS_REPO.list_all()  # type: ignore[union-attr]
+                return list(rows or [])
+            except Exception:
+                return []
+
+        executor.submit(
+            risk_metrics_worker,
+            symbols=SYMBOLS,
+            stop_event=STOP_EVENT,
+            interval_s=300.0,
+            compute_equity_total=lambda: compute_equity_total(SYMBOLS, locks),
+            get_open_positions=_get_open_positions_all,
+            get_live_price=get_precio_actual,
+            db=DB,
+        )
+
+        # --- Health check HTTP (no bloquea trading) ---
+        health_host = os.getenv('HEALTH_HOST', '0.0.0.0')
+        health_port = int(os.getenv('HEALTH_PORT', '8000'))
+
+        def _ping_binance() -> bool:
+            try:
+                _binance_call(client_trade.ping, tries=1)
+                return True
+            except Exception:
+                return False
+
+        executor.submit(
+            start_health_server,
+            host=health_host,
+            port=health_port,
+            stop_event=STOP_EVENT,
+            db=DB,
+            health_monitor=SYSTEM_HEALTH_MONITOR,
+            global_risk=GLOBAL_RISK_CONTROLLER,
+            compute_equity_total=lambda: compute_equity_total(SYMBOLS, locks),
+            ping_binance=_ping_binance,
+        )
 
         # Mantener vivo hasta stop
         while not STOP_EVENT.is_set():

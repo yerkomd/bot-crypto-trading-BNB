@@ -148,6 +148,12 @@ class OpenPositionsRepository:
                 to_ins["symbol"] = symbol
                 new_id = self._insert_in_cursor(cur, to_ins)
                 if new_id is not None:
+                    # Persist id back to caller's dict to avoid reinserting on next reconcile
+                    # and to allow stable updates via id.
+                    try:
+                        p["id"] = int(new_id)
+                    except Exception:
+                        p["id"] = new_id
                     keep.add(int(new_id))
 
             to_delete = list(existing - keep)

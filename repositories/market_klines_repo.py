@@ -147,3 +147,65 @@ class MarketKlinesRepository:
         out = list(rows)
         out.reverse()
         return out
+
+    def read_range(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        start_time: datetime,
+        end_time: datetime,
+        limit: int | None = None,
+    ) -> Optional[list[dict]]:
+        """Read klines for [start_time, end_time) in ascending order.
+
+        Times are stored as TIMESTAMP (naive UTC). Caller is responsible for passing
+        naive UTC datetimes.
+        """
+
+        symbol = str(symbol).upper().strip()
+        interval = str(interval).strip()
+        start_dt = _to_dt_naive_utc(start_time)
+        end_dt = _to_dt_naive_utc(end_time)
+
+        limit_n = None
+        if limit is not None:
+            try:
+                limit_n = max(1, int(limit))
+            except Exception:
+                limit_n = None
+
+        def _q(cur):
+            if limit_n is None:
+                cur.execute(
+                    """
+                    SELECT symbol, interval, open_time, close_time,
+                           open, high, low, close,
+                           volume, quote_volume, trades
+                    FROM trading.market_klines
+                    WHERE symbol = %s AND interval = %s
+                      AND open_time >= %s AND open_time < %s
+                    ORDER BY open_time ASC
+                    """,
+                    (symbol, interval, start_dt, end_dt),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol, interval, open_time, close_time,
+                           open, high, low, close,
+                           volume, quote_volume, trades
+                    FROM trading.market_klines
+                    WHERE symbol = %s AND interval = %s
+                      AND open_time >= %s AND open_time < %s
+                    ORDER BY open_time ASC
+                    LIMIT %s
+                    """,
+                    (symbol, interval, start_dt, end_dt, limit_n),
+                )
+            return cur.fetchall()
+
+        rows = self._db.run(_q, retries=2, swallow=True)
+        if rows is None:
+            return None
+        return list(rows)

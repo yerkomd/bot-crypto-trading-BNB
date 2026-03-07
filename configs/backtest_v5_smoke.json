@@ -1,0 +1,18 @@
+{
+  "strategy": "v5",
+  "source": "csv",
+  "csv": "tests/_bt_demo/BTCUSDT_1h.csv",
+  "symbols": "BTCUSDT",
+  "interval": "1h",
+  "start": "2024-01-01",
+  "end": "2024-01-20",
+  "initial_cash": 1000.0,
+  "fee_rate": 0.001,
+  "slippage_bps": 0.0,
+  "max_positions_per_symbol": 1,
+  "min_notional": 10.0,
+  "hard_cooldown_s": 0.0,
+  "v5_model_path": "artifacts/model_momentum_v1.joblib",
+  "v5_threshold_override": null,
+  "output_dir": "backtest_out_v5_smoke"
+}
