@@ -89,11 +89,25 @@ class MLStrategy(BaseStrategy):
             logger.warning("[%s][ml] generate_entry falló: %s", state.symbol, e)
             return Signal.hold(state.symbol, self.strategy_id, state.regime, f"error:{e}")
 
-        if not entry_sig.should_enter:
-            return Signal.hold(state.symbol, self.strategy_id, state.regime, "ml_no_entry")
+        ml_meta = dict(entry_sig.meta or {})
+        # Siempre extraer la probabilidad raw — incluso en HOLD — para que
+        # PortfolioManager pueda usarla como escalador de posición (modo híbrido).
+        raw_prob = float(ml_meta.get("ml_prob", 0.0))
 
-        ml_meta = entry_sig.meta or {}
-        confidence = float(ml_meta.get("ml_prob", 0.5))
+        if not entry_sig.should_enter:
+            # Devolver HOLD pero con raw_prob en confidence para que PortfolioManager
+            # pueda compararlo contra ml_min_confidence (gate del modo híbrido).
+            return Signal(
+                symbol=state.symbol,
+                side="HOLD",
+                size_frac=0.0,
+                strategy_id=self.strategy_id,
+                confidence=raw_prob,    # prob real, no 0.0, para el gate híbrido
+                regime=state.regime,
+                meta={"reason": "ml_no_entry", "raw_prob": raw_prob, **ml_meta},
+            )
+
+        confidence = raw_prob if raw_prob > 0 else 0.5
         size = float(entry_sig.position_size_frac) if entry_sig.position_size_frac else self.position_size_frac
 
         return Signal(
@@ -103,7 +117,7 @@ class MLStrategy(BaseStrategy):
             strategy_id=self.strategy_id,
             confidence=confidence,
             regime=state.regime,
-            meta=ml_meta,
+            meta={"raw_prob": raw_prob, **ml_meta},
         )
 
     def prepare_indicators(self, *, symbol: str, df: pd.DataFrame) -> pd.DataFrame:

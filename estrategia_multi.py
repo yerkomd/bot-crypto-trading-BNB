@@ -42,6 +42,8 @@ class MultiStrategyBacktestAdapter(Strategy):
     _engine: Optional[StrategyEngine] = field(default=None, repr=False)
     _portfolio: Optional[PortfolioManager] = field(default=None, repr=False)
     _ml_adapter: Any = field(default=None, repr=False)
+    # Stores the full prepared df per symbol so generate_entry can slice correctly
+    _prepared_dfs: dict = field(default_factory=dict, repr=False)
 
     def _get_engine(self) -> StrategyEngine:
         if self._engine is None:
@@ -68,9 +70,12 @@ class MultiStrategyBacktestAdapter(Strategy):
         """Prepara indicadores técnicos delegando al MLStrategy (usa BotV5StrategyAdapter)."""
         ml = self._get_ml_adapter()
         if ml is not None and hasattr(ml, "prepare_indicators"):
-            return ml.prepare_indicators(symbol=symbol, df=df)
-        # Fallback: retornar df sin modificar
-        return df
+            result = ml.prepare_indicators(symbol=symbol, df=df)
+        else:
+            result = df
+        # Store full df so generate_entry can provide the correct slice to technical strategies
+        self._prepared_dfs[symbol] = result
+        return result
 
     def generate_entry(self, ctx: StrategyContext) -> EntrySignal:
         """Evalúa todas las estrategias y genera señal de entrada via PortfolioManager."""
@@ -80,12 +85,20 @@ class MultiStrategyBacktestAdapter(Strategy):
 
             regime = str(ctx.regime or "LATERAL").upper()
 
-            # Reconstruir MarketState desde StrategyContext
-            # df no está disponible en ctx, usar un DataFrame mínimo con indicators
-            df_row = pd.DataFrame([ctx.indicators])
+            # Use the full prepared df sliced up to bar i so that technical strategies
+            # can access df.iloc[-2] (last closed candle = bar i-1) correctly.
+            full_df = self._prepared_dfs.get(ctx.symbol)
+            if full_df is not None and hasattr(ctx, "i") and ctx.i is not None:
+                df_slice = full_df.iloc[: ctx.i + 1]
+            elif full_df is not None:
+                df_slice = full_df
+            else:
+                # Fallback: single-row df — only MLStrategy will work correctly
+                df_slice = pd.DataFrame([ctx.indicators])
+
             state = MarketState(
                 symbol=ctx.symbol,
-                df=df_row,
+                df=df_slice,
                 regime=regime,
                 balance=float(ctx.cash or 0.0),
                 equity=float(ctx.equity or 0.0),

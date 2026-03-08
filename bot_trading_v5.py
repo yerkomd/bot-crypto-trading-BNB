@@ -2941,12 +2941,24 @@ def main():
             len(STRATEGY_ENGINE.strategies),
             [s.strategy_id for s in STRATEGY_ENGINE.strategies],
         )
-        logger.info(
-            "PortfolioManager: buy_thr=%.2f sell_thr=%.2f veto_on_hold=%s",
-            PORTFOLIO_MANAGER.buy_threshold,
-            PORTFOLIO_MANAGER.sell_threshold,
-            PORTFOLIO_MANAGER.veto_on_hold,
-        )
+        if PORTFOLIO_MANAGER.ml_hybrid_mode:
+            logger.info(
+                "PortfolioManager: buy_thr=%.2f veto_on_hold=%s "
+                "modo=HÍBRIDO ml_min_conf=%.2f scales=(%.1fx/%.1fx/%.1fx)",
+                PORTFOLIO_MANAGER.buy_threshold,
+                PORTFOLIO_MANAGER.veto_on_hold,
+                PORTFOLIO_MANAGER.ml_min_confidence,
+                PORTFOLIO_MANAGER.ml_size_scale_low,
+                PORTFOLIO_MANAGER.ml_size_scale_mid,
+                PORTFOLIO_MANAGER.ml_size_scale_high,
+            )
+        else:
+            logger.info(
+                "PortfolioManager: buy_thr=%.2f sell_thr=%.2f veto_on_hold=%s modo=ESTÁNDAR",
+                PORTFOLIO_MANAGER.buy_threshold,
+                PORTFOLIO_MANAGER.sell_threshold,
+                PORTFOLIO_MANAGER.veto_on_hold,
+            )
     except Exception as e:
         logger.warning("StrategyEngine/PortfolioManager init falló (fail-open): %s", e)
         STRATEGY_ENGINE = None
