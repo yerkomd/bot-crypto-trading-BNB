@@ -53,6 +53,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -245,7 +246,7 @@ class MeanReversionStrategy(BaseStrategy):
         # Excluir BTC/ETH por defecto; usar patrón regex para altcoins
         # RE:^(?!BTC|ETH).+USDT$ → cualquier USDT que NO sea BTC ni ETH
         raw = _env("MEAN_REV_SYMBOLS", "RE:^(?!BTC|ETH).+USDT$")
-        self.ELIGIBLE_SYMBOLS = [s.strip() for s in raw.split(',') if s.strip()]
+        self.ELIGIBLE_SYMBOLS = [s.strip().upper() for s in raw.split(',') if s.strip()]
 
     def signal(self, df: pd.DataFrame, symbol: str, regime: str, balance: float) -> StrategySignal:
         NO = StrategySignal(should_enter=False, strategy_name=self.name)
@@ -274,7 +275,8 @@ class MeanReversionStrategy(BaseStrategy):
         if any(v != v for v in [price, lband, rsi_now, rsi_prev]):
             return NO
 
-        rsi_crossing_up = rsi_now > rsi_prev  # RSI girando hacia arriba
+        # RSI cruzando desde zona sobreventa: estaba por debajo del umbral y ahora sube
+        rsi_crossing_up = rsi_prev <= self.rsi_os and rsi_now > rsi_prev
         ok = (
             price < lband
             and rsi_now <= self.rsi_os
@@ -301,36 +303,40 @@ class MeanReversionStrategy(BaseStrategy):
 
 class FundingArbitrageStrategy(BaseStrategy):
     """
-    Señal LONG cuando el funding rate es muy negativo (shorts pagan a longs).
+    Filtro macro basado en funding rate de futuros perpetuos (spot-safe).
 
-    Fundamento:
-    • Funding < -THRESHOLD → mercado muy corto → reversión probable → comprar spot/long perp
-    • Funding >  THRESHOLD → mercado muy largo  → evitar nuevas longs
+    Para un bot spot esta estrategia actúa como guardia de sentimiento:
+      • Funding >  THRESHOLD → mercado sobreexpuesto en longs → bloquear entrada
+      • Funding <= THRESHOLD → sentimiento neutro o bajista   → permitir entrada
+      • Sin datos / API down → fail-open (no bloquear trading)
+      • Régimen BEAR         → bloquear entrada (consistente con otras estrategias)
 
-    Fuente de datos: Binance Futures API (GET /fapi/v1/fundingRate).
-    Con red no disponible cae en fallback (no señal = fail-closed).
-
-    NOTA: Esta estrategia es más adecuada para futuros perpetuos.
-    Para spot, úsala como filtro macro (evitar entrar cuando funding es muy positivo).
+    No genera señales de entrada propias — en modo MAJORITY/ALL actúa como veto.
+    Fuente: Binance Futures API (GET /fapi/v1/fundingRate). Caché de 1h.
     """
     name = "funding_arb"
-    _CACHE: dict[str, dict] = {}        # {symbol: {rate: float, ts: float}}
-    _CACHE_TTL_S: float = 3600.0        # refrescar cada hora (funding cambia cada 8h)
+    _CACHE: dict[str, dict] = {}              # {symbol: {rate: float, ts: float}}
+    _CACHE_LOCK: threading.Lock = threading.Lock()  # protege _CACHE en multi-hilo
+    _CACHE_TTL_S: float = 3600.0              # refrescar cada hora (funding cambia cada 8h)
 
     def __init__(self) -> None:
         self.threshold  = _env_float("FUNDING_THRESHOLD", 0.0005)
-        self.pos_size   = _env_float("FUNDING_POSITION_SIZE", 0.05)
         self._session   = requests.Session()
 
         raw = _env("FUNDING_SYMBOLS", "BTCUSDT,ETHUSDT")
         self.ELIGIBLE_SYMBOLS = [s.strip().upper() for s in raw.split(',') if s.strip()]
 
+    def close(self) -> None:
+        """Cierra la sesión HTTP. Llamar en shutdown del bot."""
+        self._session.close()
+
     def _fetch_funding_rate(self, symbol: str) -> Optional[float]:
-        """Retorna el funding rate actual. Usa caché de 1h."""
+        """Retorna el funding rate actual. Usa caché thread-safe de 1h."""
         now = time.time()
-        cached = FundingArbitrageStrategy._CACHE.get(symbol)
-        if cached and (now - cached.get('ts', 0)) < self._CACHE_TTL_S:
-            return float(cached['rate'])
+        with FundingArbitrageStrategy._CACHE_LOCK:
+            cached = FundingArbitrageStrategy._CACHE.get(symbol)
+            if cached and (now - cached.get('ts', 0)) < self._CACHE_TTL_S:
+                return float(cached['rate'])
 
         url = "https://fapi.binance.com/fapi/v1/fundingRate"
         try:
@@ -343,7 +349,8 @@ class FundingArbitrageStrategy(BaseStrategy):
             data = resp.json()
             if data and isinstance(data, list):
                 rate = float(data[-1].get('fundingRate', 0.0))
-                FundingArbitrageStrategy._CACHE[symbol] = {'rate': rate, 'ts': now}
+                with FundingArbitrageStrategy._CACHE_LOCK:
+                    FundingArbitrageStrategy._CACHE[symbol] = {'rate': rate, 'ts': now}
                 logger.debug("[%s] funding rate: %.6f", symbol, rate)
                 return rate
         except Exception as e:
@@ -351,27 +358,27 @@ class FundingArbitrageStrategy(BaseStrategy):
         return None
 
     def signal(self, df: pd.DataFrame, symbol: str, regime: str, balance: float) -> StrategySignal:
-        NO = StrategySignal(should_enter=False, strategy_name=self.name)
+        PASS = StrategySignal(should_enter=True, strategy_name=self.name)
+        NO   = StrategySignal(should_enter=False, strategy_name=self.name)
 
-        # Para spot, usar como filtro macro: sólo entrar si funding no es extremadamente positivo
+        if regime == "BEAR":
+            return NO
+
         rate = self._fetch_funding_rate(symbol)
         if rate is None:
-            return NO  # fail-closed si no hay datos
+            return PASS  # fail-open: API caída no debe bloquear trading spot
 
-        # LONG: funding muy negativo → shorts pagando → reversión alcista probable
-        ok = rate < -self.threshold
-
-        # Bloqueo adicional: no entrar si funding extremadamente positivo (mercado muy largo)
-        if rate > self.threshold * 2:
-            return NO
+        # Bloquear solo si el mercado futures está sobreexpuesto en longs
+        ok = rate <= self.threshold
 
         return StrategySignal(
             should_enter=ok,
             strategy_name=self.name,
-            position_size_frac=self.pos_size if ok else None,
+            position_size_frac=None,  # filtro macro: no sugiere tamaño de posición
             meta={
                 "funding_rate": rate,
                 "threshold": self.threshold,
+                "blocked": not ok,
                 "regime": regime,
             },
         )
@@ -401,6 +408,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         self.lookback       = _env_int("VOL_BREAKOUT_LOOKBACK", 20)
         self.vol_mult       = _env_float("VOL_BREAKOUT_VOL_MULT", 1.2)   # volumen > N x media
         self.bb_window      = _env_int("VOL_BREAKOUT_BB_WINDOW", 20)
+        self.bb_expansion_lag = _env_int("VOL_BREAKOUT_BB_LAG", 3)       # velas atrás para comparar BB width
         self.pos_size       = _env_float("VOL_BREAKOUT_POSITION_SIZE", 0.06)
 
         raw = _env("VOL_BREAKOUT_SYMBOLS", "")  # vacío = todos los símbolos
@@ -437,7 +445,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             # BB Width
             bb = ta.volatility.BollingerBands(close=close, window=self.bb_window, window_dev=2)
             bb_width_now  = float((bb.bollinger_hband() - bb.bollinger_lband()).iloc[idx])
-            bb_width_prev = float((bb.bollinger_hband() - bb.bollinger_lband()).iloc[idx - 3])
+            bb_width_prev = float((bb.bollinger_hband() - bb.bollinger_lband()).iloc[idx - self.bb_expansion_lag])
 
         except Exception as e:
             logger.debug("[%s][vol_breakout] error: %s", symbol, e)
@@ -544,14 +552,14 @@ class MultiStrategyEngine:
         else:  # ALL
             ok = n_positive == n_eligible and n_eligible > 0
 
-        # Tamaño de posición: promedio de los sugeridos por estrategias positivas
+        # Tamaño de posición: mínimo de los sugeridos (conservador, evita sobreexposición)
         sizes = [s.position_size_frac for s in positive if s.position_size_frac is not None]
-        pos_size = (sum(sizes) / len(sizes)) if sizes else None
+        pos_size = min(sizes) if sizes else None
 
         # Nombre de estrategias que dispararon
         triggered = [s.strategy_name for s in positive]
 
-        logger.info(
+        logger.debug(
             "[%s] MultiEngine: mode=%s eligible=%d positive=%d enter=%s triggered=%s",
             symbol, self.mode, n_eligible, n_positive, ok, triggered,
         )
@@ -585,7 +593,7 @@ def build_default_engine() -> MultiStrategyEngine:
     Ejemplo:
         MULTI_ENGINE = build_default_engine()
     """
-    mode = _env("STRATEGY_MODE", "ANY")
+    mode = _env("STRATEGY_MODE", "MAJORITY")
     strategies: list[BaseStrategy] = [
         TrendFollowingStrategy(),
         MeanReversionStrategy(),

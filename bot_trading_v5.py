@@ -109,9 +109,15 @@ V3_VAR_MONITOR: IntradayVaRMonitor | None = None
 V3_SLIPPAGE_MONITOR: SlippageMonitor | None = None
 V3_EQUITY_REGIME_FILTER: EquityRegimeFilter | None = None
 
-# Motor multi-estrategia (inicializado en main())
+# Motor multi-estrategia legacy (inicializado en main())
 from strategies_multi import MultiStrategyEngine, build_default_engine
 MULTI_ENGINE: MultiStrategyEngine | None = None
+
+# Arquitectura multi-estrategia v2 (StrategyEngine + PortfolioManager)
+from strategy_engine import StrategyEngine
+from portfolio_manager import PortfolioManager, PortfolioOrder
+STRATEGY_ENGINE: StrategyEngine | None = None
+PORTFOLIO_MANAGER: PortfolioManager | None = None
 
 POSITIONS_CACHE_BY_SYMBOL: dict[str, list[dict]] = {}
 
@@ -2281,6 +2287,17 @@ def _build_v5_strategy_adapter():
     )
 
 
+def _build_strategy_engine() -> tuple[StrategyEngine, PortfolioManager]:
+    """Construye el StrategyEngine y PortfolioManager del sistema multi-estrategia v2.
+
+    Inyectable en tests: reemplazar _build_strategy_engine para evitar carga del modelo ML.
+    """
+    from strategy_engine import build_default_engine as _build_engine
+    engine = _build_engine()
+    pm = PortfolioManager(strategies=engine.strategies)
+    return engine, pm
+
+
 # Ejecutar la estrategia en tiempo real
 def run_strategy(symbol, lock):
     logger.info(f"[{symbol}] Iniciando hilo de estrategia")
@@ -2413,7 +2430,38 @@ def run_strategy(symbol, lock):
                     STOP_EVENT.wait(poll_interval)
                     continue
 
-            # Señal de entrada via adaptador de estrategia (técnicos + ML en generate_entry).
+            # --- Sistema multi-estrategia v2: StrategyEngine + PortfolioManager ---
+            # Construye MarketState para pasar a todas las estrategias.
+            from strategies.base_strategy import MarketState as _MarketState
+            _market_state = _MarketState(
+                symbol=symbol,
+                df=df,
+                regime=regime,
+                balance=float(balance),
+                equity=float(equity_est),
+                open_positions=list(positions),
+                indicators=dict(row),
+            )
+
+            # Evaluar todas las estrategias elegibles (fail-safe por estrategia)
+            _portfolio_order: PortfolioOrder | None = None
+            try:
+                if STRATEGY_ENGINE is not None and PORTFOLIO_MANAGER is not None:
+                    _signals = STRATEGY_ENGINE.collect(_market_state)
+                    _portfolio_order = PORTFOLIO_MANAGER.decide(symbol, _signals)
+                    if not _portfolio_order.should_enter:
+                        logger.debug(
+                            "[%s] PortfolioManager: HOLD score=%.3f triggered=%s vetoed=%s",
+                            symbol,
+                            _portfolio_order.score,
+                            _portfolio_order.triggered_by,
+                            _portfolio_order.vetoed_by,
+                        )
+            except Exception as _pe:
+                logger.warning("[%s] StrategyEngine/PortfolioManager falló (fail-open): %s", symbol, _pe)
+                _portfolio_order = None
+
+            # Fallback: señal ML directa (compatibilidad con estrategia única)
             ctx = StrategyContext(
                 symbol=symbol,
                 i=len(df) - 2,
@@ -2427,53 +2475,35 @@ def run_strategy(symbol, lock):
             )
             sig = strategy.generate_entry(ctx)
 
-            # --- Multi-estrategia: confirmación adicional (Modo B híbrido) ---
-            # La señal ML original es el filtro principal.
-            # MULTI_ENGINE actúa como capa de confirmación extra.
-            # Para cambiar el comportamiento ajusta STRATEGY_MODE en .env:
-            #   ANY      → basta una estrategia (más señales)
-            #   MAJORITY → mayoría de estrategias deben coincidir (recomendado)
-            #   ALL      → todas deben coincidir (más conservador)
-            multi_enter = True   # fail-open: si no hay engine, no bloquea
-            multi_size: float | None = None
-            try:
-                if MULTI_ENGINE is not None:
-                    sig_ext = MULTI_ENGINE.evaluate(
-                        symbol=symbol,
-                        df=df,
-                        regime=regime,
-                        balance=float(balance),
-                        ctx=ctx,
-                    )
-                    multi_enter = sig_ext.should_enter
-                    multi_size = sig_ext.position_size_frac
-                    if sig.should_enter and not multi_enter:
-                        logger.info(
-                            "[%s] MultiEngine bloqueó entrada: ML=True MULTI=False triggered=%s",
-                            symbol,
-                            sig_ext.meta.get("triggered", []),
-                        )
-            except Exception as _me:
-                logger.warning("[%s] MultiEngine.evaluate falló (fail-open): %s", symbol, _me)
-
-            entry_ok = sig.should_enter and multi_enter
-            position_size_active = (
-                float(multi_size) if (multi_size is not None and float(multi_size) > 0)
-                else float(sig.position_size_frac) if (sig.position_size_frac is not None and float(sig.position_size_frac) > 0)
-                else float(POSITION_SIZE_SIMPLE)
-            )
+            # Determinar si entrar y el tamaño de posición
+            if _portfolio_order is not None:
+                entry_ok = _portfolio_order.should_enter
+                position_size_active = (
+                    float(_portfolio_order.size_frac) if _portfolio_order.size_frac > 0
+                    else float(POSITION_SIZE_SIMPLE)
+                )
+                _entry_meta = _portfolio_order.meta
+            else:
+                # Fallback: solo señal ML (STRATEGY_ENGINE no disponible)
+                entry_ok = sig.should_enter
+                position_size_active = (
+                    float(sig.position_size_frac) if (sig.position_size_frac is not None and float(sig.position_size_frac) > 0)
+                    else float(POSITION_SIZE_SIMPLE)
+                )
+                _entry_meta = sig.meta or {}
 
             if entry_ok:
-                ml_meta = sig.meta or {}
                 logger.info(
-                    "[%s] Señal entrada: regime=%s ml_prob=%s close=%.4f ema50=%.4f ema200=%.4f adx=%.2f",
+                    "[%s] Señal entrada: regime=%s ml_prob=%s close=%.4f ema50=%.4f ema200=%.4f adx=%.2f triggered=%s",
                     symbol,
                     regime,
-                    ml_meta.get('ml_prob'),
+                    (_entry_meta.get('ml_prob') if _portfolio_order is None else
+                     _entry_meta.get('strategies_buy', [])),
                     close_f,
                     ema50_f,
                     ema200_f,
                     adx_f,
+                    _portfolio_order.triggered_by if _portfolio_order else [],
                 )
 
             # Intento compra principal
@@ -2606,7 +2636,7 @@ def run_strategy(symbol, lock):
                         except Exception as e:
                             logger.warning(f"[{symbol}] Risk v3 slippage falló (fail-open): {e}")
 
-                        _sig_meta = sig.meta or {}
+                        _sig_meta = _entry_meta
                         new_position = {
                             'buy_price': float(entry_price),
                             'amount': qty,
@@ -2891,7 +2921,7 @@ def main():
         V3_SLIPPAGE_MONITOR = None
         V3_EQUITY_REGIME_FILTER = None
 
-    # --- Motor multi-estrategia: inicialización (fail-open, no bloquea trading) ---
+    # --- Motor multi-estrategia legacy: inicialización (fail-open) ---
     global MULTI_ENGINE
     try:
         MULTI_ENGINE = build_default_engine()
@@ -2901,6 +2931,26 @@ def main():
     except Exception as e:
         logger.warning("MultiStrategyEngine init falló (continuando sin multi-engine): %s", e)
         MULTI_ENGINE = None
+
+    # --- Arquitectura multi-estrategia v2: StrategyEngine + PortfolioManager ---
+    global STRATEGY_ENGINE, PORTFOLIO_MANAGER
+    try:
+        STRATEGY_ENGINE, PORTFOLIO_MANAGER = _build_strategy_engine()
+        logger.info(
+            "StrategyEngine inicializado: %d estrategias — %s",
+            len(STRATEGY_ENGINE.strategies),
+            [s.strategy_id for s in STRATEGY_ENGINE.strategies],
+        )
+        logger.info(
+            "PortfolioManager: buy_thr=%.2f sell_thr=%.2f veto_on_hold=%s",
+            PORTFOLIO_MANAGER.buy_threshold,
+            PORTFOLIO_MANAGER.sell_threshold,
+            PORTFOLIO_MANAGER.veto_on_hold,
+        )
+    except Exception as e:
+        logger.warning("StrategyEngine/PortfolioManager init falló (fail-open): %s", e)
+        STRATEGY_ENGINE = None
+        PORTFOLIO_MANAGER = None
 
     locks = {symbol: threading.Lock() for symbol in SYMBOLS}
     logger.info(f"Iniciando bot con símbolos: {SYMBOLS}")
