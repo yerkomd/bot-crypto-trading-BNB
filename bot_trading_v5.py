@@ -43,6 +43,8 @@ from risk_layer_v3 import (
     VolatilityPositionSizer,
 )
 
+from backtesting.bt_types import StrategyContext
+
 # Cargar variables de entorno desde un archivo .env (no toca red; seguro para imports/tests)
 load_dotenv()
 
@@ -2412,7 +2414,6 @@ def run_strategy(symbol, lock):
                     continue
 
             # Señal de entrada via adaptador de estrategia (técnicos + ML en generate_entry).
-            from backtesting.bt_types import StrategyContext
             ctx = StrategyContext(
                 symbol=symbol,
                 i=len(df) - 2,
@@ -2652,16 +2653,108 @@ def run_strategy(symbol, lock):
                         )
                         executed = True
 
-            # DCA: desactivado por defecto (ENABLE_DCA=0). Si se activa, solo detecta
-            # la condición pero NO ejecuta orden (implementación pendiente).
-            # Nunca en BEAR; cooldown ya aplicado antes de este punto.
-            if ENABLE_DCA and (not executed) and len(positions) == 0:
-                movimiento = market_change_last_5_intervals(symbol)
-                if movimiento is not None and balance > symbol_min_notional and movimiento <= -5:
-                    logger.warning(
-                        f"[{symbol}] DCA: condición detectada movimiento={movimiento:.2f}%"
-                        " (lógica de compra DCA pendiente de implementar)."
-                    )
+            # DCA: compra adicional cuando el mercado cae >= 5% en las últimas 5 velas.
+            # Solo activo si ENABLE_DCA=true en .env. Nunca en BEAR.
+            # Usa 50% del position_size normal para no sobreexponer el capital.
+            if ENABLE_DCA and (not executed) and regime != "BEAR" and len(positions) == 0:
+                try:
+                    movimiento = market_change_last_5_intervals(symbol)
+                    if movimiento is not None and balance > symbol_min_notional and movimiento <= -5:
+                        logger.info(
+                            f"[{symbol}] DCA: condición activada movimiento={movimiento:.2f}% — "
+                            f"intentando compra reducida (50% position_size)"
+                        )
+
+                        # Tamaño reducido al 50% para DCA — evitar martingala agresivo
+                        capital_dca = balance * (position_size_active * 0.5)
+
+                        qty_dca, motivo_dca = preparar_cantidad(
+                            symbol, capital_dca, close_price, filters=symbol_filters
+                        )
+
+                        if qty_dca is None:
+                            logger.info(f"[{symbol}] DCA skip: {motivo_dca}")
+                        else:
+                            entry_price_dca = float(close_f)
+                            take_profit_dca, stop_loss_dca, risk_extra_dca = strategy.compute_risk_levels(
+                                symbol=symbol,
+                                regime=regime,
+                                buy_price=entry_price_dca,
+                                indicators_row=dict(row),
+                            )
+
+                            resp_dca = ejecutar_orden_con_confirmacion('buy', symbol, qty_dca)
+                            if resp_dca:
+                                # Registrar slippage (Risk v3)
+                                try:
+                                    if V3_SLIPPAGE_MONITOR is not None:
+                                        exec_qty = float(resp_dca.get('executedQty', 0) or 0)
+                                        quote_qty = float(resp_dca.get('cummulativeQuoteQty', 0) or 0)
+                                        if exec_qty > 0 and quote_qty > 0:
+                                            V3_SLIPPAGE_MONITOR.record_fill(
+                                                expected_price=float(entry_price_dca),
+                                                fill_price=float(quote_qty / exec_qty),
+                                            )
+                                except Exception as e:
+                                    logger.warning(f"[{symbol}] DCA slippage monitor falló: {e}")
+
+                                new_position_dca = {
+                                    'buy_price':            float(entry_price_dca),
+                                    'amount':               qty_dca,
+                                    'timestamp':            timestamp,
+                                    'regime':               str(regime),
+                                    'take_profit':          float(take_profit_dca),
+                                    'stop_loss':            float(stop_loss_dca),
+                                    'tp_initial':           float(risk_extra_dca.get('tp_initial', take_profit_dca)),
+                                    'atr_entry':            float(risk_extra_dca.get('atr_entry', atr)),
+                                    'tp_atr_mult':          float(risk_extra_dca.get('tp_atr_mult', 2.5)),
+                                    'sl_atr_mult':          float(risk_extra_dca.get('sl_atr_mult', 1.5)),
+                                    'trailing_sl_atr_mult': float(risk_extra_dca.get('trailing_sl_atr_mult', trailing_sl_atr_mult_fixed)),
+                                    'trailing_active':      bool(risk_extra_dca.get('trailing_active', False)),
+                                    'max_price':            float(risk_extra_dca.get('max_price', entry_price_dca)),
+                                    'ml_prob':              None,   # DCA no usa filtro ML
+                                    'ml_threshold':         None,
+                                    'dca':                  True,   # Marca la posición como DCA
+                                    'dca_movimiento':       float(movimiento),
+                                }
+                                with lock:
+                                    current = load_positions(symbol)
+                                    current.append(new_position_dca)
+                                    save_positions(symbol, current)
+
+                                balance = get_balance()
+                                last_buy_time = time.time()
+
+                                send_event_to_telegram(
+                                    f'📉 DCA {symbol}: {qty_dca:.6f} @ {close_price:.4f} '
+                                    f'(caída {movimiento:.2f}%)',
+                                    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                                )
+                                log_trade(
+                                    timestamp, symbol, 'buy', close_price, qty_dca, 0,
+                                    volatility,
+                                    (df['rsi'].iloc[-2] if 'rsi' in df.columns else None),
+                                    (df['stochrsi_k'].iloc[-2] if 'stochrsi_k' in df.columns else None),
+                                    (df['stochrsi_d'].iloc[-2] if 'stochrsi_d' in df.columns else None),
+                                    'DCA',
+                                    extra={
+                                        'take_profit_pct_used':  None,
+                                        'stop_loss_pct_used':    None,
+                                        'trailing_tp_pct_used':  None,
+                                        'trailing_sl_pct_used':  float(trailing_sl_atr_mult_fixed),
+                                        'buy_cooldown_used':     None,
+                                        'position_size_used':    position_size_active * 0.5,
+                                        'regime':                str(regime),
+                                        'dca_movimiento':        float(movimiento),
+                                        'ml_prob':               None,
+                                        'ml_threshold':          None,
+                                    }
+                                )
+                                executed = True
+                            else:
+                                logger.error(f"[{symbol}] DCA orden fallida qty={qty_dca}")
+                except Exception as e:
+                    logger.warning(f"[{symbol}] DCA bloque falló (continuando): {e}")
             
             STOP_EVENT.wait(poll_interval)
 
