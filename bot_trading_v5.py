@@ -107,6 +107,10 @@ V3_VAR_MONITOR: IntradayVaRMonitor | None = None
 V3_SLIPPAGE_MONITOR: SlippageMonitor | None = None
 V3_EQUITY_REGIME_FILTER: EquityRegimeFilter | None = None
 
+# Motor multi-estrategia (inicializado en main())
+from strategies_multi import MultiStrategyEngine, build_default_engine
+MULTI_ENGINE: MultiStrategyEngine | None = None
+
 POSITIONS_CACHE_BY_SYMBOL: dict[str, list[dict]] = {}
 
 def _require_repos():
@@ -2421,10 +2425,40 @@ def run_strategy(symbol, lock):
                 last_entry_time=last_buy_time,
             )
             sig = strategy.generate_entry(ctx)
-            entry_ok = sig.should_enter
+
+            # --- Multi-estrategia: confirmación adicional (Modo B híbrido) ---
+            # La señal ML original es el filtro principal.
+            # MULTI_ENGINE actúa como capa de confirmación extra.
+            # Para cambiar el comportamiento ajusta STRATEGY_MODE en .env:
+            #   ANY      → basta una estrategia (más señales)
+            #   MAJORITY → mayoría de estrategias deben coincidir (recomendado)
+            #   ALL      → todas deben coincidir (más conservador)
+            multi_enter = True   # fail-open: si no hay engine, no bloquea
+            multi_size: float | None = None
+            try:
+                if MULTI_ENGINE is not None:
+                    sig_ext = MULTI_ENGINE.evaluate(
+                        symbol=symbol,
+                        df=df,
+                        regime=regime,
+                        balance=float(balance),
+                        ctx=ctx,
+                    )
+                    multi_enter = sig_ext.should_enter
+                    multi_size = sig_ext.position_size_frac
+                    if sig.should_enter and not multi_enter:
+                        logger.info(
+                            "[%s] MultiEngine bloqueó entrada: ML=True MULTI=False triggered=%s",
+                            symbol,
+                            sig_ext.meta.get("triggered", []),
+                        )
+            except Exception as _me:
+                logger.warning("[%s] MultiEngine.evaluate falló (fail-open): %s", symbol, _me)
+
+            entry_ok = sig.should_enter and multi_enter
             position_size_active = (
-                float(sig.position_size_frac)
-                if (sig.position_size_frac is not None and float(sig.position_size_frac) > 0)
+                float(multi_size) if (multi_size is not None and float(multi_size) > 0)
+                else float(sig.position_size_frac) if (sig.position_size_frac is not None and float(sig.position_size_frac) > 0)
                 else float(POSITION_SIZE_SIMPLE)
             )
 
@@ -2763,6 +2797,17 @@ def main():
         V3_VAR_MONITOR = None
         V3_SLIPPAGE_MONITOR = None
         V3_EQUITY_REGIME_FILTER = None
+
+    # --- Motor multi-estrategia: inicialización (fail-open, no bloquea trading) ---
+    global MULTI_ENGINE
+    try:
+        MULTI_ENGINE = build_default_engine()
+        logger.info("MultiStrategyEngine inicializado: mode=%s strategies=%s",
+                    MULTI_ENGINE.mode,
+                    [s.name for s in MULTI_ENGINE.strategies])
+    except Exception as e:
+        logger.warning("MultiStrategyEngine init falló (continuando sin multi-engine): %s", e)
+        MULTI_ENGINE = None
 
     locks = {symbol: threading.Lock() for symbol in SYMBOLS}
     logger.info(f"Iniciando bot con símbolos: {SYMBOLS}")
