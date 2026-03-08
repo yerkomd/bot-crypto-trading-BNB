@@ -1,0 +1,75 @@
+# ── Dockerfile.bot ────────────────────────────────────────────────────────────
+# Proceso: bot_trading_v5.py
+# Rol: Motor de trading (señales + órdenes). Conecta a Binance TESTNET.
+# Puerto: 8001 (Flask health endpoint)
+# Dependencias externas: PostgreSQL (POSTGRES_HOST), Binance TESTNET API
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim AS base
+
+# Metadata
+LABEL maintainer="bot-crypto-trading"
+LABEL service="bot-trading"
+LABEL description="Motor de trading v5 con multi-estrategia ML híbrido"
+
+# Variables de build
+ARG APP_DIR=/app
+ARG APP_USER=botuser
+
+# Dependencias del sistema (psycopg2-binary no necesita libpq-dev, pero sí gcc para algunas libs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Timezone
+ENV TZ=UTC
+
+# Usuario sin privilegios
+RUN groupadd --gid 1001 ${APP_USER} \
+ && useradd --uid 1001 --gid 1001 --no-create-home --shell /bin/false ${APP_USER}
+
+WORKDIR ${APP_DIR}
+
+# ── Instalar dependencias Python ──────────────────────────────────────────────
+# Separar COPY requirements para aprovechar cache de capas
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
+
+# ── Copiar código fuente ───────────────────────────────────────────────────────
+# Módulos core del bot de trading
+COPY bot_trading_v5.py           .
+COPY estrategia_v5.py            .
+COPY estrategia_multi.py         .
+COPY strategies_multi.py         .
+COPY strategy_engine.py          .
+COPY portfolio_manager.py        .
+COPY risk_layer_v2.py            .
+COPY risk_layer_v3.py            .
+
+# Paquetes (directorios con __init__.py)
+COPY strategies/                 strategies/
+COPY db/                         db/
+COPY services/                   services/
+COPY repositories/               repositories/
+
+# Artefactos ML (modelos entrenados)
+COPY artifacts/                  artifacts/
+
+# ── Directorios de runtime ────────────────────────────────────────────────────
+RUN mkdir -p logs \
+ && chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
+
+# ── Usuario sin privilegios ───────────────────────────────────────────────────
+USER ${APP_USER}
+
+# Puerto del health endpoint Flask
+EXPOSE 8001
+
+# Health check: verifica que el endpoint /health responda
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${HEALTH_PORT:-8001}/health || exit 1
+
+# Entrypoint
+CMD ["python", "bot_trading_v5.py"]

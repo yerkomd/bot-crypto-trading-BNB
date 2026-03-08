@@ -1,0 +1,101 @@
+# ── docker-compose.yml ────────────────────────────────────────────────────────
+# Arquitectura: dos servicios independientes + PostgreSQL externo
+#
+#   market-data  →  Ingesta OHLCV desde Binance MAINNET → PostgreSQL
+#   bot-trading  →  Motor de trading v5 (señales + órdenes) → Binance TESTNET
+#
+# PostgreSQL corre en el host (192.168.1.50) — NO se gestiona aquí.
+# Ambos contenedores leen .env para su configuración.
+#
+# Uso:
+#   docker compose up -d                    # arrancar ambos servicios
+#   docker compose up -d market-data        # solo ingesta de datos
+#   docker compose up -d bot-trading        # solo bot
+#   docker compose logs -f bot-trading      # seguir logs del bot
+#   docker compose down                     # detener y eliminar contenedores
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Ingesta de datos de mercado ─────────────────────────────────────────────
+  market-data:
+    build:
+      context: .
+      dockerfile: Dockerfile.market_data
+    image: bot-crypto/market-data:latest
+    container_name: market-data
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # Sobrescribir solo si se necesita; el resto viene de .env
+      - TZ=UTC
+
+    volumes:
+      # Logs persistentes fuera del contenedor
+      - ./logs:/app/logs
+
+    # Red del host: accede a PostgreSQL en 192.168.1.50 sin configuración adicional
+    network_mode: host
+
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "market_data_process.py"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── Motor de trading ─────────────────────────────────────────────────────────
+  bot-trading:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    image: bot-crypto/bot-trading:latest
+    container_name: bot-trading
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      - TZ=UTC
+
+    volumes:
+      # Logs persistentes fuera del contenedor
+      - ./logs:/app/logs
+      # Artefactos ML: si se reentrenan fuera del contenedor, se reflejan sin rebuild
+      - ./artifacts:/app/artifacts:ro
+
+    # Puerto del health endpoint Flask
+    ports:
+      - "${HEALTH_PORT:-8001}:${HEALTH_PORT:-8001}"
+
+    # Red del host: accede a PostgreSQL en 192.168.1.50 sin configuración adicional
+    network_mode: host
+
+    # El bot-trading puede arrancar antes de que market-data esté listo,
+    # pero idealmente se espera a que la DB tenga datos recientes.
+    depends_on:
+      market-data:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${HEALTH_PORT:-8001}/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "10"

@@ -1,0 +1,51 @@
+# ── Dockerfile.market_data ────────────────────────────────────────────────────
+# Proceso: market_data_process.py
+# Rol: Ingesta de datos OHLCV desde Binance MAINNET → PostgreSQL.
+#      NO ejecuta órdenes. Proceso separado e independiente del trading.
+# Dependencias externas: PostgreSQL (POSTGRES_HOST), Binance MAINNET (endpoints públicos)
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.12-slim AS base
+
+LABEL maintainer="bot-crypto-trading"
+LABEL service="market-data"
+LABEL description="Proceso de ingesta de datos de mercado (klines) hacia PostgreSQL"
+
+ARG APP_DIR=/app
+ARG APP_USER=botuser
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=UTC
+
+RUN groupadd --gid 1001 ${APP_USER} \
+ && useradd --uid 1001 --gid 1001 --no-create-home --shell /bin/false ${APP_USER}
+
+WORKDIR ${APP_DIR}
+
+# ── Dependencias Python ───────────────────────────────────────────────────────
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
+
+# ── Código fuente ─────────────────────────────────────────────────────────────
+COPY market_data_process.py      .
+
+COPY db/                         db/
+COPY services/                   services/
+COPY repositories/               repositories/
+
+# ── Directorios de runtime ────────────────────────────────────────────────────
+RUN mkdir -p logs \
+ && chown -R ${APP_USER}:${APP_USER} ${APP_DIR}
+
+USER ${APP_USER}
+
+# Health check: verifica que el proceso siga vivo consultando el PID
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD pgrep -f market_data_process.py || exit 1
+
+CMD ["python", "market_data_process.py"]

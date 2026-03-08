@@ -1,0 +1,63 @@
+# ── Entornos virtuales ─────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Secretos (nunca en imagen) ────────────────────────────────────────────────
+.env
+
+# ── Cache Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# ── Salidas de backtest ────────────────────────────────────────────────────────
+backtest_out*/
+tests/_out_backtest*/
+tests/_bt_demo/
+
+# ── Logs (se montan como volumen en runtime) ───────────────────────────────────
+logs/
+
+# ── Git ────────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Docker (no incluir dentro de sí mismo) ────────────────────────────────────
+Dockerfile*
+docker-compose.yml
+.dockerignore
+
+# ── Versiones antiguas del bot (no necesarias en producción) ──────────────────
+bot-trading.py
+bot_trading_v2.py
+bot_trading_v2_2.py
+bot_trading_v3.py
+bot_trading_v3_1.py
+bot_trading_v4.py
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+tests/
+
+# ── Scripts de backtest (no necesarios en runtime) ────────────────────────────
+run_backtest_2022_multi.py
+backtest_strategy.py
+backtesting/
+configs/
+tools/
+
+# ── Artefactos ML antiguos (solo incluir el activo) ───────────────────────────
+artifacts/model_momentum_v1.joblib
+artifacts/model_momentum_v2.joblib
+artifacts/model_momentum_v3.joblib
+artifacts/kmeans_regime_*.joblib
+
+# ── Miscelánea ─────────────────────────────────────────────────────────────────
+*.md
+*.yaml
+*.json
+*.csv
+*.sql
