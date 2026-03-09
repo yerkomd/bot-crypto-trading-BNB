@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -108,6 +109,14 @@ class BotV5StrategyAdapter(Strategy):
             except Exception:
                 out["adx"] = pd.NA
 
+        # EMA200 slope: positiva = tendencia alcista de largo plazo.
+        # Se usa para filtrar entradas en rallies de mercados bajistas.
+        ema200_slope_bars = int(os.getenv("BT_EMA200_SLOPE_BARS", "10"))
+        if "ema200" in out.columns:
+            out["ema200_slope"] = out["ema200"] - out["ema200"].shift(ema200_slope_bars)
+        else:
+            out["ema200_slope"] = pd.NA
+
         # Compute ML engineered features if the artifact requests them and they are OHLCV-derivable.
         try:
             b = self._load_bundle()
@@ -163,9 +172,21 @@ class BotV5StrategyAdapter(Strategy):
         except Exception:
             return EntrySignal(False, pos_size, None)
 
-        tech_ok = (close_f > ema200_f) and (ema50_f > ema200_f) and (adx_f > 25.0)
+        adx_min = float(os.getenv("BT_ADX_MIN", "25.0"))
+        tech_ok = (close_f > ema200_f) and (ema50_f > ema200_f) and (adx_f > adx_min)
         if not tech_ok:
             return EntrySignal(False, pos_size, None)
+
+        # Filtro de pendiente EMA200: bloquea entradas cuando la tendencia de largo plazo
+        # es bajista (ej. rallies en mercado bear). Controlado por BT_EMA200_SLOPE_FILTER.
+        if os.getenv("BT_EMA200_SLOPE_FILTER", "true").lower() == "true":
+            ema200_slope = ctx.indicators.get("ema200_slope")
+            if ema200_slope is not None and not pd.isna(ema200_slope):
+                try:
+                    if float(ema200_slope) <= 0:
+                        return EntrySignal(False, pos_size, None)
+                except Exception:
+                    pass
 
         bundle = self._load_bundle()
         if not bundle:
@@ -219,9 +240,10 @@ class BotV5StrategyAdapter(Strategy):
         if atr_f <= 0:
             raise ValueError(f"ATR invalid: {atr_f}")
 
-        tp_mult = 2.5
-        sl_mult = 1.5
-        trailing_mult = 1.2
+        import os as _os
+        tp_mult      = float(_os.getenv("BT_TP_ATR_MULT",      "2.5"))
+        sl_mult      = float(_os.getenv("BT_SL_ATR_MULT",      "1.5"))
+        trailing_mult = float(_os.getenv("BT_TRAILING_ATR_MULT", "1.2"))
 
         tp, sl = bot.calculate_atr_levels(float(buy_price), float(atr_f), float(tp_mult), float(sl_mult))
 

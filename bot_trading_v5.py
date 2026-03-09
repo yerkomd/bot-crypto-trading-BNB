@@ -580,11 +580,28 @@ SYMBOL_COOLDOWN_AFTER_DAILY_LOSS_SECONDS = int(os.getenv('SYMBOL_COOLDOWN_AFTER_
 ENABLE_DCA = str(os.getenv('ENABLE_DCA', '0')).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 # Multiplicadores ATR por régimen: TP/SL y trailing-stop (solo para nuevas posiciones)
+# Configurables via env vars: BULL_TP_MULT, BULL_SL_MULT, BULL_TRAIL_MULT (y equivalentes LATERAL_*)
 ATR_MULTIPLIERS = {
-    "BULL": {"tp": 2.5, "sl": 1.5, "trailing_sl": 1.2},
-    "LATERAL": {"tp": 2.0, "sl": 1.2, "trailing_sl": 1.0},
+    "BULL": {
+        "tp":          float(os.getenv("BULL_TP_MULT",    "4.0")),
+        "sl":          float(os.getenv("BULL_SL_MULT",    "1.5")),
+        "trailing_sl": float(os.getenv("BULL_TRAIL_MULT", "2.0")),
+    },
+    "LATERAL": {
+        "tp":          float(os.getenv("LATERAL_TP_MULT",    "2.0")),
+        "sl":          float(os.getenv("LATERAL_SL_MULT",    "1.2")),
+        "trailing_sl": float(os.getenv("LATERAL_TRAIL_MULT", "1.0")),
+    },
     "BEAR": None,
 }
+
+# ADX mínimo para considerar régimen como tendencia fuerte (BULL/BEAR).
+# Umbral elevado (35) para reducir entradas en rallies de mercado bajista.
+ADX_REGIME_MIN = float(os.getenv("ADX_REGIME_MIN", "35.0"))
+
+# Filtro pendiente EMA200: True = solo entrar cuando EMA200 tiene tendencia alcista.
+EMA200_SLOPE_FILTER = str(os.getenv("EMA200_SLOPE_FILTER", "true")).lower() == "true"
+EMA200_SLOPE_BARS   = int(os.getenv("EMA200_SLOPE_BARS", "10"))
 
 # Si hay balance bloqueado en órdenes abiertas, un STOP LOSS podría no poder vender.
 # Si activas esta opción, el bot intentará cancelar órdenes abiertas del símbolo para liberar balance.
@@ -2233,9 +2250,9 @@ def detect_market_regime(df):
         if pd.isna(price) or pd.isna(ema200) or pd.isna(adx):
             return "LATERAL"
 
-        if price > ema200 and adx >= 25:
+        if price > ema200 and adx >= ADX_REGIME_MIN:
             return "BULL"
-        elif price < ema200 and adx >= 25:
+        elif price < ema200 and adx >= ADX_REGIME_MIN:
             return "BEAR"
         else:
             return "LATERAL"
@@ -2491,6 +2508,21 @@ def run_strategy(symbol, lock):
                     else float(POSITION_SIZE_SIMPLE)
                 )
                 _entry_meta = sig.meta or {}
+
+            # Filtro adicional: pendiente EMA200 debe ser positiva para confirmar tendencia alcista.
+            # Bloquea entradas en rallies dentro de mercados bajistas (EMA200 declinante).
+            if entry_ok and EMA200_SLOPE_FILTER:
+                try:
+                    ema200_slope_val = row.get("ema200_slope")
+                    if ema200_slope_val is not None and not pd.isna(ema200_slope_val):
+                        if float(ema200_slope_val) <= 0:
+                            logger.info(
+                                "[%s] EMA200 slope negativa (%.4f) — entrada bloqueada (filtro tendencia alcista).",
+                                symbol, float(ema200_slope_val),
+                            )
+                            entry_ok = False
+                except Exception:
+                    pass
 
             if entry_ok:
                 logger.info(
